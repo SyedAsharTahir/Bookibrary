@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #000000;
+  /* Add the rest of your color variables from the file you shared here */
+  --primary: hsl(0, 100%, 43%);
+  --border: #000000;
+  /* Keeping these variables is what makes the theme look "brutalist/modern" */
+  --shadow: 3px 3px 0px 0px hsl(0 0% 0% / 1.00); 
+}
+
+@layer base {
+  body {
+    @apply bg-[var(--background)] text-[var(--foreground)] font-sans;
+  }
+}
