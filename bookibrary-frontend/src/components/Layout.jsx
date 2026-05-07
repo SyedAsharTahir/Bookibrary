@@ -1,13 +1,13 @@
 import React from 'react';
+import { Outlet } from 'react-router-dom';
 import Navbar from './Navbar';
 
-const Layout = ({ children }) => {
+const Layout = () => {
   return (
-    // These classes now pull from your config!
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground flex">
       <Navbar />
-      <main className="max-w-7xl mx-auto p-6">
-        {children}
+      <main className="flex-1 p-6">
+        <Outlet />
       </main>
     </div>
   );

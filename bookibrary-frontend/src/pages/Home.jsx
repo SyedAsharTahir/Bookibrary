@@ -18,10 +18,10 @@ function Home() {
 
     useEffect(() => {
         API.get('books/').then(r => setStats(s => ({ ...s, books: r.data.length }))).catch(() => {});
-        API.get('member/').then(r => setStats(s => ({ ...s, members: r.data.length }))).catch(() => {});
-        API.get('borrowing/').then(r => setStats(s => ({ ...s, borrowings: r.data.length }))).catch(() => {});
-        API.get('reservation/').then(r => setStats(s => ({ ...s, reservations: r.data.length }))).catch(() => {});
-        API.get('fine/').then(r => setStats(s => ({ ...s, fines: r.data.length }))).catch(() => {});
+        API.get('members/').then(r => setStats(s => ({ ...s, members: r.data.length }))).catch(() => {});
+        API.get('borrowings/').then(r => setStats(s => ({ ...s, borrowings: r.data.length }))).catch(() => {});
+        API.get('reservations/').then(r => setStats(s => ({ ...s, reservations: r.data.length }))).catch(() => {});
+        API.get('fines/').then(r => setStats(s => ({ ...s, fines: r.data.length }))).catch(() => {});
     }, []);
 
     const cards = [

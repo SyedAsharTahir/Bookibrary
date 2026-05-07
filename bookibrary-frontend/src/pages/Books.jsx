@@ -1,15 +1,22 @@
 import React, { useEffect, useState } from "react";
 import API from "../api/axios";
 import DataTable from "../components/DataTable";
+import LoadingSpinner from "../components/LoadingSpinner";
+import TableSkeleton from "../components/TableSkeleton";
 
 function Books() {
     const [books, setBooks] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [form, setForm] = useState({
         title: '', author: '', isbn: '', quantity: 1, published_date: ''
     });
 
     const fetchBooks = () => {
-        API.get('books/').then(response => setBooks(response.data)).catch(error => console.log(error));
+        setLoading(true);
+        API.get('books/')
+            .then(response => setBooks(response.data))
+            .catch(error => console.log(error))
+            .finally(() => setLoading(false));
     }
     const Change = (e) => {
         setForm({ ...form, [e.target.name]: e.target.value });
@@ -53,22 +60,29 @@ return (
             </div>
 
             {/* Books Table - Now using the DataTable Component */}
-           <DataTable 
-    columns={['ID', 'Title', 'Author', 'ISBN', 'Qty', 'Published']}
-    data={books}
-    onDelete={Del}
->
-    {books.map(book => (
-        <React.Fragment key={book.id}>
-            <td className="p-3 border-r border-border">{book.id}</td>
-            <td className="p-3 border-r border-border">{book.title}</td>
-            <td className="p-3 border-r border-border">{book.author}</td>
-            <td className="p-3 border-r border-border">{book.isbn}</td>
-            <td className="p-3 border-r border-border">{book.quantity}</td>
-            <td className="p-3 border-r border-border">{book.published_date}</td>
-        </React.Fragment>
-    ))}
-</DataTable>
+            {loading ? (
+                <div className="space-y-3">
+                    <LoadingSpinner text="Loading books..." />
+                    <TableSkeleton rows={5} columns={7} />
+                </div>
+            ) : (
+                <DataTable
+                    columns={['ID', 'Title', 'Author', 'ISBN', 'Qty', 'Published']}
+                    data={books}
+                    onDelete={Del}
+                >
+                    {books.map(book => (
+                        <React.Fragment key={book.id}>
+                            <td className="p-3 border-r border-border">{book.id}</td>
+                            <td className="p-3 border-r border-border">{book.title}</td>
+                            <td className="p-3 border-r border-border">{book.author}</td>
+                            <td className="p-3 border-r border-border">{book.isbn}</td>
+                            <td className="p-3 border-r border-border">{book.quantity}</td>
+                            <td className="p-3 border-r border-border">{book.published_date}</td>
+                        </React.Fragment>
+                    ))}
+                </DataTable>
+            )}
         </div>
     );
 }

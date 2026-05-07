@@ -1,160 +1,363 @@
 from django.shortcuts import render
-# Create your views here.
 from rest_framework.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import connection, transaction
 from django.contrib.auth.models import User
-from rest_framework import viewsets,status
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from django.utils import timezone
+from django.db.models import Count, Sum
+from django.db.models.functions import Coalesce
 from rest_framework.response import Response
 from .models import *
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
-#view is a class or perhaps a function that recieves a web request and returns a legible response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.views import APIView
+
+
 def get_role(request):
     if not request.user.is_authenticated:
-        return 'guest'
+        return "guest"
     try:
         return request.user.member.role
-    except:
+    except Exception:
         if request.user.is_superuser:
-            return 'admin'
-        return 'member'
+            return "admin"
+        return "member"
 
 
 class CustomTokenView(TokenObtainPairView):
-    serializer_class=CustomTokenSerializer
+    serializer_class = CustomTokenSerializer
+
+
+class DashboardStatsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        stats = {
+            "total_books": BOOK.objects.count(),
+            "total_members": Member.objects.count(),
+            "active_borrowings": Borrowing.objects.count(),
+            "overdue_books": Borrowing.objects.filter(
+                dueDate__lt=timezone.now().date()
+            ).count(),
+            "total_fines": Fine.objects.count(),
+        }
+        return Response(stats)
 
 class BookViewSet(viewsets.ModelViewSet):
-    #api endpoint to allow users to be viewed or edited
-    queryset=BOOK.objects.all()
-    serializer_class=BookSerializer
-    def create(self,request,*args,**kwargs):
-        if get_role(request) not in ['admin','librarian']:
-            raise PermissionDenied("Dont posses Permission To Add Books")
-        return super().create(request,*args,**kwargs)
-    
-    def update(self,request,*args,**kwargs):
-        if get_role(request) not in ['admin','librarian']:
-            raise PermissionDenied("Dont posses Permission To Update Books")
-        return super().update(request,*args,**kwargs)
-    
-    def destroy(self,request,*args,**kwargs):
-        if get_role(request) not in ['admin','librarian']:
-            raise PermissionDenied("Dont posses Permission To Delete Books")
-        return super().destroy(request,*args,**kwargs)
+    queryset = BOOK.objects.all()
+    serializer_class = BookSerializer
+
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("You do not have permission to add books.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("You do not have permission to update books.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("You do not have permission to delete books.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class MemberViewSet(viewsets.ModelViewSet):
-    queryset=Member.objects.all()
-    serializer_class=MemberSerializer
-    def destroy(self,request,pk=None):
-        if get_role(request)!='admin':
-            raise PermissionDenied("Only Admins Possess The Ability to Delete Member")
-        member=Member.objects.get(pk=pk)
+    queryset = Member.objects.all()
+    serializer_class = MemberSerializer
+
+    def destroy(self, request, pk=None):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admins can delete members.")
+        member = Member.objects.get(pk=pk)
         if member.user:
             member.user.delete()
         else:
             member.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-    #creating a personal create function to override the default create
-    #because the default creat would save whatever the frontend  sends to database
-    def create(self,request):
-        if get_role(request)!='admin':
-            raise PermissionDenied("Only Admins Possess The Ability to Add Member")
-        data=request.data#this has whatever the frontend sent
-        #creating a django login account
-        user=User.objects.create_user(
-            username=data.get('email'),#using email as username,so log in is done via email
-            email=data.get('email'),
-            password=data.get('password')
+
+    def create(self, request):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admins can add members.")
+        data = request.data
+        user = User.objects.create_user(
+            username=data.get("email"),
+            email=data.get("email"),
+            password=data.get("password"),
         )
-        #creating the memebr record
-        member=Member.objects.create(
-            user=user,#linking it to django user weve created 
-            name=data.get('name'),
-            email=data.get('email'),
-            phone=data.get('phone'),
-            role=data.get('role','member')
+        member = Member.objects.create(
+            user=user,
+            name=data.get("name"),
+            email=data.get("email"),
+            phone=data.get("phone"),
+            role=data.get("role", "member"),
         )
-        serializer=MemberSerializer(member)#member here is a python objectadn we cant send python object directly to frontend
-        #MemberSerializer is used to convert it into a JSON format so it can be sent over internet
-        return Response(serializer.data,status=status.HTTP_201_CREATED)#Response is a way to send data back to whoever has made the request(frontend in this case)
-         #status=status.HTTP_201_CREATED indicates that the request succeeded and new user was created
+        serializer = MemberSerializer(member)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
 class ReservationViewSet(viewsets.ModelViewSet):
-    queryset=Reservation.objects.all()
-    serializer_class=ReservationSerializer
+    queryset = Reservation.objects.all()
+    serializer_class = ReservationSerializer
+
 
 class FineViewSet(viewsets.ModelViewSet):
-    queryset=Fine.objects.all()
-    serializer_class=FineSerializer
-    
-    def create(self,request,*args,**kwargs):
-        if get_role(request) not in ['admin','librarian']:
-            raise PermissionDenied("Dont posses Permission To Add Fines")
-        return super().create(request,*args,**kwargs)
-    def destroy(self,request,*args,**kwargs):
-        if get_role(request) not in ['admin','librarian']:
-            raise PermissionDenied("Dont posses Permission To Delete Fines")
-        return super().destroy(request,*args,**kwargs)
+    queryset = Fine.objects.all()
+    serializer_class = FineSerializer
+
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("You do not have permission to add fines.")
+        return super().create(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("You do not have permission to delete fines.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class BorrowingViewSet(viewsets.ModelViewSet):
-    queryset=Borrowing.objects.all()
-    serializer_class=BorrowingSerializer
-    @action(detail=True,methods=['post'])  
-    def return_book(self,request,pk=None):
-        if get_role(request) not in ['admin','librarian']:
+    queryset = Borrowing.objects.all()
+    serializer_class = BorrowingSerializer
+
+    @action(detail=True, methods=["post"])
+    def return_book(self, request, pk=None):
+        if get_role(request) not in ["admin", "librarian"]:
             raise PermissionDenied("Only staff can access the Book returns")
-        borrowing=self.get_object()
+        borrowing = self.get_object()
         with transaction.atomic():
-            today=timezone.now().date()
-            #calcualting fine using the fine Policy
-            fineAmount=0
-            if today>borrowing.dueDate:
-                OverDueDays=(today-borrowing.dueDate).days
-                policy=FinePolicy.objects.filter(category=borrowing.book.category).first()
-                rate=policy.finePerDay if policy else 5 #5 if no policy 
-                fineAmount=OverDueDays*rate
-            #creating history record
+            today = timezone.now().date()
+            fine_amount = 0
+            if today > borrowing.dueDate:
+                overdue_days = (today - borrowing.dueDate).days
+                policy = FinePolicy.objects.filter(category=borrowing.book.category).first()
+                rate = policy.finePerDay if policy else 5
+                fine_amount = overdue_days * rate
+
             BorrowingHistory.objects.create(
                 book=borrowing.book,
                 member=borrowing.member,
                 borrowDate=borrowing.borrowDate,
                 dueDate=borrowing.dueDate,
                 returnDate=today,
-                fineCharged=fineAmount
+                fineCharged=fine_amount,
             )
-            #update the book stock
-            book=borrowing.book
-            book.quantity+=1
+
+            book = borrowing.book
+            book.quantity += 1
             book.save()
-            #remove from active borrowing
+
             borrowing.delete()
-            return Response({"message":"Book returned and History Archived","fineCharged":fineAmount},status=status.HTTP_200_OK)
+            return Response(
+                {
+                    "message": "Book returned and history archived.",
+                    "fineCharged": fine_amount,
+                },
+                status=status.HTTP_200_OK,
+            )
+
 
 class CategoryViewSet(viewsets.ModelViewSet):
-    queryset=Category.objects.all()
-    serializer_class=CategorySerializer
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+
 
 class FinePolicyViewSet(viewsets.ModelViewSet):
-    queryset=FinePolicy.objects.all()
-    serializer_class=FinePolicySerializer
+    queryset = FinePolicy.objects.all()
+    serializer_class = FinePolicySerializer
+
 
 class NotificationViewSet(viewsets.ModelViewSet):
-    queryset=Notification.objects.all()
-    serializer_class=NotificationSerializer
+    queryset = Notification.objects.all()
+    serializer_class = NotificationSerializer
+
 
 class BorrowingHistoryViewSet(viewsets.ModelViewSet):
-    queryset=BorrowingHistory.objects.all()
-    serializer_class=BorrowingHistorySerializer
+    queryset = BorrowingHistory.objects.all()
+    serializer_class = BorrowingHistorySerializer
+
 
 class AuthorViewSet(viewsets.ModelViewSet):
-    queryset=Author.objects.all()
-    serializer_class=AuthorSerializer
+    queryset = Author.objects.all()
+    serializer_class = AuthorSerializer
+
 
 class PublisherViewSet(viewsets.ModelViewSet):
-    queryset=Publisher.objects.all()
-    serializer_class=PublisherSerializer
+    queryset = Publisher.objects.all()
+    serializer_class = PublisherSerializer
+
 
 class FinePaymentViewSet(viewsets.ModelViewSet):
-    queryset=FinePayment.objects.all()
-    serializer_class=FinePaymentSerializer
+    queryset = FinePayment.objects.all()
+    serializer_class = FinePaymentSerializer
+
+
+class AdminReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admin can view admin reports.")
+
+        role_filter = request.query_params.get("role")
+        start_date = request.query_params.get("start_date")
+        end_date = request.query_params.get("end_date")
+
+        members_qs = Member.objects.all()
+        if role_filter:
+            members_qs = members_qs.filter(role=role_filter)
+
+        borrowing_history_qs = BorrowingHistory.objects.all()
+        if start_date:
+            borrowing_history_qs = borrowing_history_qs.filter(returnDate__gte=start_date)
+        if end_date:
+            borrowing_history_qs = borrowing_history_qs.filter(returnDate__lte=end_date)
+
+        members_with_borrow_counts = list(
+            members_qs.annotate(
+                total_borrowed=Count("borrowinghistory")
+            ).values("id", "name", "role", "total_borrowed").order_by("-total_borrowed")
+        )
+
+        overdue_borrowings = Borrowing.objects.filter(
+            dueDate__lt=timezone.now().date()
+        ).values("id", "book__title", "member__name", "dueDate")
+
+        borrowing_history_stats = borrowing_history_qs.aggregate(
+            total_returns=Count("id"),
+            total_fine_collected=Coalesce(Sum("fineCharged"), 0),
+        )
+
+        return Response({
+            "filters": {
+                "role": role_filter,
+                "start_date": start_date,
+                "end_date": end_date,
+            },
+            "member_activity": members_with_borrow_counts,
+            "overdue_active_borrowings": list(overdue_borrowings),
+            "history_summary": borrowing_history_stats,
+        })
+
+
+class LibrarianReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can view librarian reports.")
+
+        category_id = request.query_params.get("category_id")
+        due_before = request.query_params.get("due_before")
+
+        books_qs = BOOK.objects.select_related("category", "author", "publisher")
+        if category_id:
+            books_qs = books_qs.filter(category_id=category_id)
+
+        book_inventory = list(
+            books_qs.values(
+                "id",
+                "title",
+                "isbn",
+                "quantity",
+                "category__name",
+                "author__name",
+                "publisher__name",
+            ).order_by("title")
+        )
+
+        borrowings_qs = Borrowing.objects.select_related("book", "member")
+        if due_before:
+            borrowings_qs = borrowings_qs.filter(dueDate__lte=due_before)
+
+        active_borrowings = list(
+            borrowings_qs.values(
+                "id",
+                "book__title",
+                "member__name",
+                "borrowDate",
+                "dueDate",
+            ).order_by("dueDate")
+        )
+
+        reservation_summary = list(
+            Reservation.objects.values("status").annotate(total=Count("id")).order_by("status")
+        )
+
+        return Response({
+            "filters": {
+                "category_id": category_id,
+                "due_before": due_before,
+            },
+            "book_inventory": book_inventory,
+            "active_borrowings": active_borrowings,
+            "reservation_summary": reservation_summary,
+        })
+
+
+class MemberReportView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = get_role(request)
+        if role not in ["admin", "librarian", "member"]:
+            raise PermissionDenied("Unauthorized role.")
+
+        requested_member_id = request.query_params.get("member_id")
+        if role == "member":
+            member = Member.objects.filter(user=request.user).first()
+            if not member:
+                raise PermissionDenied("No member profile is linked to your account.")
+            target_member_id = member.id
+        else:
+            if not requested_member_id:
+                return Response(
+                    {"detail": "member_id query parameter is required for staff access."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            target_member_id = requested_member_id
+
+        member_borrowing_history = list(
+            BorrowingHistory.objects.filter(member_id=target_member_id)
+            .select_related("book")
+            .values("book__title", "borrowDate", "dueDate", "returnDate", "fineCharged")
+            .order_by("-returnDate")
+        )
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT member_id, member_name, book_title, fine_amount, issued_date
+                FROM vw_unpaid_fines_report
+                WHERE member_id = %s
+                ORDER BY issued_date DESC
+                """,
+                [target_member_id],
+            )
+            unpaid_fines = [
+                {
+                    "member_id": row[0],
+                    "member_name": row[1],
+                    "book_title": row[2],
+                    "fine_amount": float(row[3]),
+                    "issued_date": row[4],
+                }
+                for row in cursor.fetchall()
+            ]
+
+        current_borrowings = list(
+            Borrowing.objects.filter(member_id=target_member_id)
+            .values("book__title", "borrowDate", "dueDate")
+            .order_by("dueDate")
+        )
+
+        return Response({
+            "member_id": target_member_id,
+            "current_borrowings": current_borrowings,
+            "borrowing_history": member_borrowing_history,
+            "unpaid_fines": unpaid_fines,
+        })
+

@@ -9,24 +9,24 @@ function Reservations() {
     const [form, setForm] = useState({ status: '', book: '', member: '' });
 
     const fetchReservations = () => {
-        API.get('reservation/').then(r => setReservations(r.data)).catch(e => console.log(e));
+        API.get('reservations/').then(r => setReservations(r.data)).catch(e => console.log(e));
     };
     useEffect(() => {
         fetchReservations();
         API.get('books/').then(r => setBooks(r.data)).catch(e => console.log(e));
-        API.get('member/').then(r => setMembers(r.data)).catch(e => console.log(e));
+        API.get('members/').then(r => setMembers(r.data)).catch(e => console.log(e));
     }, []);
 
     const change = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
     const SendToDjango = () => {
-        API.post('reservation/', form).then(() => {
+        API.post('reservations/', form).then(() => {
             fetchReservations();
             setForm({ status: '', book: '', member: '' });
         }).catch(e => console.log(e));
     };
     const Del = (id) => {
-        API.delete(`reservation/${id}/`).then(() => fetchReservations()).catch(e => console.log(e));
+        API.delete(`reservations/${id}/`).then(() => fetchReservations()).catch(e => console.log(e));
     };
 
     return (

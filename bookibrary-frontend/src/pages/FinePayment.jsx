@@ -22,7 +22,7 @@ const FinePayment = ({ fineId, amountDue, onSuccess }) => {
 
         setLoading(true);
         try {
-            await API.post('finepayment/', payment);
+            await API.post('finepayments/', payment);
             alert("Payment processed successfully!");
             if (onSuccess) onSuccess(); // Callback to refresh parent list
         } catch (error) {

@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import API from "../api/axios";
 import DataTable from "../components/DataTable";
+import LoadingSpinner from "../components/LoadingSpinner";
+import TableSkeleton from "../components/TableSkeleton";
 
 function Borrowing() {
     const [borrowings, setBorrowings] = useState([]);
@@ -15,9 +17,9 @@ function Borrowing() {
         try {
             setLoading(true);
             const [borrowRes, bookRes, memberRes] = await Promise.all([
-                API.get('borrowing/'),
+                API.get('borrowings/'),
                 API.get('books/'),
-                API.get('member/')
+                API.get('members/')
             ]);
             setBorrowings(borrowRes.data);
             setBooks(bookRes.data);
@@ -38,7 +40,7 @@ function Borrowing() {
 
     const SendToDjango = async () => {
         try {
-            await API.post('borrowing/', form);
+            await API.post('borrowings/', form);
             await fetchData();
             setForm({ book: '', member: '', dueDate: '', returnDate: '', returned: false });
         } catch (err) {
@@ -49,7 +51,7 @@ function Borrowing() {
     const Del = async (id) => {
         if (window.confirm("Delete this borrowing record?")) {
             try {
-                await API.delete(`borrowing/${id}/`);
+                await API.delete(`borrowings/${id}/`);
                 fetchData();
             } catch (err) {
                 console.error(err);
@@ -59,8 +61,6 @@ function Borrowing() {
 
     const getBookTitle = (id) => books.find(b => b.id === parseInt(id))?.title || `#${id}`;
     const getMemberName = (id) => members.find(m => m.id === parseInt(id))?.name || `#${id}`;
-
-    if (loading) return <div className="p-8 text-sm">Loading records...</div>;
 
     return (
         <div>
@@ -98,26 +98,33 @@ function Borrowing() {
                 </button>
             </div>
 
-            <DataTable
-                columns={['ID', 'Book', 'Member', 'Due Date', 'Return Date', 'Status']}
-                data={borrowings}
-                onDelete={Del}
-            >
-                {borrowings.map(b => (
-                    <React.Fragment key={b.id}>
-                        <td className="p-3 border-r border-border">{b.id}</td>
-                        <td className="p-3 border-r border-border">{getBookTitle(b.book)}</td>
-                        <td className="p-3 border-r border-border">{getMemberName(b.member)}</td>
-                        <td className="p-3 border-r border-border">{b.dueDate}</td>
-                        <td className="p-3 border-r border-border">{b.returnDate || '—'}</td>
-                        <td className="p-3 border-r border-border">
-                            <span className={`px-2 py-1 text-xs font-medium border border-border ${b.returned ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                                {b.returned ? 'RETURNED' : 'ACTIVE'}
-                            </span>
-                        </td>
-                    </React.Fragment>
-                ))}
-            </DataTable>
+            {loading ? (
+                <div className="space-y-3">
+                    <LoadingSpinner text="Loading borrowing records..." />
+                    <TableSkeleton rows={5} columns={7} />
+                </div>
+            ) : (
+                <DataTable
+                    columns={['ID', 'Book', 'Member', 'Due Date', 'Return Date', 'Status']}
+                    data={borrowings}
+                    onDelete={Del}
+                >
+                    {borrowings.map(b => (
+                        <React.Fragment key={b.id}>
+                            <td className="p-3 border-r border-border">{b.id}</td>
+                            <td className="p-3 border-r border-border">{getBookTitle(b.book)}</td>
+                            <td className="p-3 border-r border-border">{getMemberName(b.member)}</td>
+                            <td className="p-3 border-r border-border">{b.dueDate}</td>
+                            <td className="p-3 border-r border-border">{b.returnDate || '—'}</td>
+                            <td className="p-3 border-r border-border">
+                                <span className={`px-2 py-1 text-xs font-medium border border-border ${b.returned ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
+                                    {b.returned ? 'RETURNED' : 'ACTIVE'}
+                                </span>
+                            </td>
+                        </React.Fragment>
+                    ))}
+                </DataTable>
+            )}
         </div>
     );
 }

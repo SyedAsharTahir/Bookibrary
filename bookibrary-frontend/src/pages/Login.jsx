@@ -4,6 +4,7 @@ import axios from "axios";
 function Login(){
    const [form,setForm]=useState({username:'',password:''});
    const [error,setError]=useState('');
+   const [showPassword, setShowPassword] = useState(false);
 //async means this funciton waill wait for API call
    async function handleTheLogin(e){
     e.preventDefault();
@@ -17,15 +18,14 @@ function Login(){
    }
 
     return (
-        <div className="flex items-center justify-center min-h-screen min-w-screen dark:bg-gray-900 bg-gray-100">
-            <div className="grid gap-8 m-4">
-                <div className="bg-gradient-to-r from-blue-500 to-purple-500 rounded-[26px]">
-                    <div className="border-[20px] border-transparent rounded-[20px] dark:bg-gray-900 bg-white shadow-lg p-8">
-                        
-                        <h1 className="pt-4 pb-2 font-bold text-4xl dark:text-gray-400 text-center">
-                            📚 Bookibrary
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-indigo-50 to-purple-100 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-indigo-100 bg-white p-8 shadow-xl">
+                        <h1 className="pb-2 text-center text-4xl font-bold text-indigo-700">
+                            Bookibrary
                         </h1>
-                        <p className="text-center text-gray-500 mb-6 text-sm">Sign in to your account</p>
+                        <p className="mb-6 text-center text-sm text-gray-500">
+                            Sign in to continue
+                        </p>
 
                         {error && (
                             <div className="bg-red-100 text-red-700 px-4 py-2 rounded-md text-sm mb-4 text-center">
@@ -35,36 +35,43 @@ function Login(){
 
                         <form onSubmit={handleTheLogin} className="space-y-4">
                             <div>
-                                <label className="mb-2 dark:text-gray-400 text-lg">Username</label>
+                                <label className="mb-2 block text-sm font-medium text-gray-700">Username</label>
                                 <input
                                     type="text"
                                     value={form.username}
                                     onChange={(e) => setForm({ ...form, username: e.target.value })}
                                     placeholder="Username"
-                                    className="border dark:bg-indigo-700 dark:text-gray-300 dark:border-gray-700 p-3 shadow-md placeholder:text-base border-gray-300 rounded-lg w-full focus:scale-105 ease-in-out duration-300"
+                                    className="w-full rounded-lg border border-gray-300 p-3 placeholder:text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
                                     required
                                 />
                             </div>
                             <div>
-                                <label className="mb-2 dark:text-gray-400 text-lg">Password</label>
+                                <label className="mb-2 block text-sm font-medium text-gray-700">Password</label>
+                                <div className="relative">
                                 <input
-                                    type="password"
+                                    type={showPassword ? "text" : "password"}
                                     value={form.password}
                                     onChange={(e) => setForm({ ...form, password: e.target.value })}
                                     placeholder="Password"
-                                    className="border dark:bg-indigo-700 dark:text-gray-300 dark:border-gray-700 p-3 shadow-md placeholder:text-base border-gray-300 rounded-lg w-full focus:scale-105 ease-in-out duration-300"
+                                    className="w-full rounded-lg border border-gray-300 p-3 pr-24 placeholder:text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-100"
                                     required
                                 />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword((prev) => !prev)}
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-50"
+                                >
+                                    {showPassword ? "Hide" : "Show"}
+                                </button>
+                                </div>
                             </div>
                             <button
                                 type="submit"
-                                className="bg-gradient-to-r from-blue-500 to-purple-500 shadow-lg mt-6 p-2 text-white rounded-lg w-full hover:scale-105 hover:from-purple-500 hover:to-blue-500 transition duration-300 ease-in-out">
-                                SIGN IN
+                                className="mt-2 w-full rounded-lg bg-indigo-600 p-3 text-sm font-semibold text-white transition hover:bg-indigo-700">
+                                Sign In
                             </button>
                         </form>
-                    </div>
                 </div>
-            </div>
         </div>
     );
 }

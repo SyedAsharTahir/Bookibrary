@@ -6,7 +6,7 @@ const Publisher = () => {
     const [name, setName] = useState("");
 
     const fetchData = async () => {
-        const res = await API.get('publisher/');
+        const res = await API.get('publishers/');
         setList(res.data);
     };
 
@@ -14,7 +14,7 @@ const Publisher = () => {
         e.preventDefault();
         if (!name.trim()) return; // Simple validation
         try {
-            await API.post('publisher/', { name });
+            await API.post('publishers/', { name });
             setName("");
             fetchData();
         } catch (error) {

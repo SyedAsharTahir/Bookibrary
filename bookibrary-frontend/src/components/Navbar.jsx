@@ -1,80 +1,107 @@
 import React, { useState } from "react";
-import {Link} from 'react-router-dom';
-import { getRole,getName,logOut } from "../auth";
+import { NavLink } from "react-router-dom";
+import { getRole, getName, logOut } from "../auth";
 
-function Navbar()
-{
-  const [mobileOpen,setMobileOpen]=useState(false);
-  const role=getRole();
-  const name=getName();
-        const linkClass = "text-gray-300 hover:text-white border-b-2 border-transparent hover:border-gray-300 px-1 pt-1 inline-flex items-center text-sm font-medium";
-    const mobileLinkClass = "text-gray-300 hover:bg-gray-700 hover:text-white block px-3 py-2 rounded-md text-base font-medium";
+function Navbar() {
+  const [open, setOpen] = useState(true);
 
-    return (
-        <nav className="bg-gray-900 text-white shadow-lg">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="flex justify-between h-16">
-                    <div className="flex items-center">
-                        <span className="text-xl font-bold">Bookibrary</span>
-                        <div className="hidden md:flex md:ml-6 md:space-x-8">
-                            <Link to="/" className={linkClass}>Home</Link>
-                            <Link to="/books" className={linkClass}>Books</Link>
-                            <Link to="/reservations" className={linkClass}>Reservations</Link>
-                            <Link to="/borrowing" className={linkClass}>Borrowing</Link>
-                            <Link to="/notifications" className={linkClass}>Notifications</Link>
-                            {(role === 'admin' || role === 'librarian') && (
-                               <>
-                                    <Link to="/fines" className={linkClass}>Fines</Link>
-                                    <Link to="/members" className={linkClass}>Members</Link>
-                                    {/* ADD THESE FOR PROJECT COMPLIANCE */}
-                                    <Link to="/finepolicy" className={linkClass}>Fine Policy</Link>
-                                    <Link to="/borrowinghistory" className={linkClass}>History</Link>
-                                </>
-                            )}
-                        </div>
-                    </div>
+  const role = getRole();
+  const name = getName();
 
-                    <div className="hidden md:flex items-center gap-4">
-                        <span className="text-sm text-gray-300">👤 {name} ({role})</span>
-                        <button onClick={logOut}
-                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded-md text-sm transition">
-                            Logout
-                        </button>
-                    </div>
+  const isAdminOrLibrarian = role === "admin" || role === "librarian";
+  const linkBase =
+    "flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 relative";
+  const active = "bg-indigo-600 text-white shadow-md";
+  const inactive = "text-gray-300 hover:bg-gray-800 hover:text-white";
 
-                    {/* Mobile menu button */}
-                    <div className="flex items-center md:hidden">
-                        <button onClick={() => setMobileOpen(!mobileOpen)} className="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-white hover:bg-gray-700 focus:outline-none">
-                            <svg className="h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
+  const linkClass = ({ isActive }) =>
+    `${linkBase} ${isActive ? active : inactive}`;
 
-            {mobileOpen && (
-                <div className="md:hidden px-2 pt-2 pb-3 space-y-1">
-                    <Link to="/" className={mobileLinkClass}>Home</Link>
-                    <Link to="/books" className={mobileLinkClass}>Books</Link>
-                    <Link to="/reservations" className={mobileLinkClass}>Reservations</Link>
-                    <Link to="/borrowing" className={mobileLinkClass}>Borrowing</Link>
-                    {(role === 'admin' || role === 'librarian') && (
-                         <>
-                                    <Link to="/fines" className={linkClass}>Fines</Link>
-                                    <Link to="/members" className={linkClass}>Members</Link>
-                                    {/* ADD THESE FOR PROJECT COMPLIANCE */}
-                                    <Link to="/finepolicy" className={linkClass}>Fine Policy</Link>
-                                    <Link to="/borrowinghistory" className={linkClass}>History</Link>
-                        </>
-                    )}
-                    <button onClick={logOut} className="w-full text-left text-red-400 hover:bg-gray-700 block px-3 py-2 rounded-md text-base font-medium">
-                        Logout
-                    </button>
-                </div>
-            )}
+  return (
+    <div
+      className={`h-screen bg-gray-900 text-white flex flex-col justify-between transition-all duration-300 ${
+        open ? "w-64" : "w-20"
+      }`}
+    >
+      <div>
+        <div className="flex items-center justify-between px-4 py-4 border-b border-gray-800">
+          <span className="font-bold text-indigo-400">
+            {open ? "Bookibrary" : "BK"}
+          </span>
+
+          <button
+            onClick={() => setOpen(!open)}
+            className="text-gray-400 hover:text-white transition"
+          >
+            ☰
+          </button>
+        </div>
+
+        <nav className="mt-4 space-y-2">
+          <NavLink to="/" className={linkClass}>
+            🏠 {open && "Home"}
+          </NavLink>
+          <NavLink to="/dashboard" className={linkClass}>
+            📊 {open && "Dashboard"}
+          </NavLink>
+          <NavLink to="/books" className={linkClass}>
+            📚 {open && "Books"}
+          </NavLink>
+          <NavLink to="/reservations" className={linkClass}>
+            📌 {open && "Reservations"}
+          </NavLink>
+          <NavLink to="/borrowing" className={linkClass}>
+            🔄 {open && "Borrowing"}
+          </NavLink>
+          <NavLink to="/notifications" className={linkClass}>
+            🔔 {open && "Notifications"}
+          </NavLink>
+
+          {isAdminOrLibrarian && (
+            <>
+              <NavLink to="/fines" className={linkClass}>
+                💰 {open && "Fines"}
+              </NavLink>
+              <NavLink to="/members" className={linkClass}>
+                👥 {open && "Members"}
+              </NavLink>
+              <NavLink to="/finepolicy" className={linkClass}>
+                📜 {open && "Fine Policy"}
+              </NavLink>
+              <NavLink to="/borrowinghistory" className={linkClass}>
+                📈 {open && "History"}
+              </NavLink>
+            </>
+          )}
+
+          <NavLink to="/category" className={linkClass}>
+            🗂 {open && "Category"}
+          </NavLink>
+          <NavLink to="/authors" className={linkClass}>
+            ✍️ {open && "Authors"}
+          </NavLink>
+          <NavLink to="/publishers" className={linkClass}>
+            🏢 {open && "Publishers"}
+          </NavLink>
         </nav>
-    );
+      </div>
+
+      <div className="border-t border-gray-800 p-4">
+        {open && (
+          <div className="text-sm text-gray-400 mb-2">
+            👤 {name} ({role})
+          </div>
+        )}
+
+        <button
+          onClick={logOut}
+          className="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg transition"
+        >
+          {open ? "Logout" : "⏻"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default Navbar;

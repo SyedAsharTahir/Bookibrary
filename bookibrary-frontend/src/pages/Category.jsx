@@ -7,18 +7,18 @@ function Category(){
     const [form,setForm]=useState({name: '',description:''});
     const role=getRole();
     const fetchCategories=()=>{
-        API.get('category/').then(r=>setCategories(r.data)).catch(e=>console.log(e));
+        API.get('categories/').then(r=>setCategories(r.data)).catch(e=>console.log(e));
     }
     useEffect(()=>{fetchCategories();},[]);
     const change=(e)=>setForm({...form,[e.target.name]:e.target.value});
     const sendToDjango=()=>{
-        API.post('category/',form).then(()=>{
+        API.post('categories/',form).then(()=>{
             fetchCategories();
             setForm({name:'',description:''});
         }).catch(e=>console.log(e));
     }
     const Del=(id)=>{
-        API.delete(`category/${id}/`).then(()=>fetchCategories()).catch(e=>console.log(e));
+        API.delete(`categories/${id}/`).then(()=>fetchCategories()).catch(e=>console.log(e));
     }
 
     return(

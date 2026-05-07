@@ -1,31 +1,38 @@
 import React, { useEffect, useState } from "react";
 import API from "../api/axios";
 import DataTable from "../components/DataTable";
+import LoadingSpinner from "../components/LoadingSpinner";
+import TableSkeleton from "../components/TableSkeleton";
 
 function Fines() {
     const [fines, setFines] = useState([]);
     const [borrowings, setBorrowings] = useState([]);
+    const [loading, setLoading] = useState(true);
     const [form, setForm] = useState({ borrowing: '', amount: '', paid: false });
 
     const fetchFines = () => {
-        API.get('fine/').then(r => setFines(r.data)).catch(e => console.log(e));
+        setLoading(true);
+        API.get('fines/')
+            .then(r => setFines(r.data))
+            .catch(e => console.log(e))
+            .finally(() => setLoading(false));
     };
     const change = (e) => {
         const value = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
         setForm({ ...form, [e.target.name]: value });
     };
     const SendToDjango = () => {
-        API.post('fine/', form).then(() => {
+        API.post('fines/', form).then(() => {
             fetchFines();
             setForm({ borrowing: '', amount: '', paid: false });
         }).catch(e => console.log(e));
     };
     const Del = (id) => {
-        API.delete(`fine/${id}/`).then(() => fetchFines()).catch(e => console.log(e));
+        API.delete(`fines/${id}/`).then(() => fetchFines()).catch(e => console.log(e));
     };
     useEffect(() => {
         fetchFines();
-        API.get('borrowing/').then(r => setBorrowings(r.data)).catch(e => console.log(e));
+        API.get('borrowings/').then(r => setBorrowings(r.data)).catch(e => console.log(e));
     }, []);
 
     return (
@@ -55,25 +62,32 @@ function Fines() {
                 </button>
             </div>
 
-            <DataTable
-                columns={['ID', 'Borrowing', 'Amount', 'Issued Date', 'Status']}
-                data={fines}
-                onDelete={Del}
-            >
-                {fines.map(fine => (
-                    <React.Fragment key={fine.id}>
-                        <td className="p-3 border-r border-border">{fine.id}</td>
-                        <td className="p-3 border-r border-border">#{fine.borrowing}</td>
-                        <td className="p-3 border-r border-border">Rs. {fine.amount}</td>
-                        <td className="p-3 border-r border-border">{fine.issuedDate}</td>
-                        <td className="p-3 border-r border-border">
-                            <span className={`px-2 py-1 text-xs font-medium border border-border ${fine.paid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                                {fine.paid ? "PAID" : "UNPAID"}
-                            </span>
-                        </td>
-                    </React.Fragment>
-                ))}
-            </DataTable>
+            {loading ? (
+                <div className="space-y-3">
+                    <LoadingSpinner text="Loading fines..." />
+                    <TableSkeleton rows={5} columns={6} />
+                </div>
+            ) : (
+                <DataTable
+                    columns={['ID', 'Borrowing', 'Amount', 'Issued Date', 'Status']}
+                    data={fines}
+                    onDelete={Del}
+                >
+                    {fines.map(fine => (
+                        <React.Fragment key={fine.id}>
+                            <td className="p-3 border-r border-border">{fine.id}</td>
+                            <td className="p-3 border-r border-border">#{fine.borrowing}</td>
+                            <td className="p-3 border-r border-border">Rs. {fine.amount}</td>
+                            <td className="p-3 border-r border-border">{fine.issuedDate}</td>
+                            <td className="p-3 border-r border-border">
+                                <span className={`px-2 py-1 text-xs font-medium border border-border ${fine.paid ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                                    {fine.paid ? "PAID" : "UNPAID"}
+                                </span>
+                            </td>
+                        </React.Fragment>
+                    ))}
+                </DataTable>
+            )}
         </div>
     );
 }
