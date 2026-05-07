@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from django.utils import timezone
-from django.db.models import Count, Sum
+from django.db.models import Count, Sum, Case, When, Value, IntegerField
 from django.db.models.functions import Coalesce
 from rest_framework.response import Response
 from .models import *
@@ -360,4 +360,112 @@ class MemberReportView(APIView):
             "borrowing_history": member_borrowing_history,
             "unpaid_fines": unpaid_fines,
         })
+
+
+class RecommendationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        role = get_role(request)
+        requested_member_id = request.query_params.get("member_id")
+        limit = int(request.query_params.get("limit", 5))
+        limit = max(1, min(limit, 20))
+
+        if role == "member":
+            member = Member.objects.filter(user=request.user).first()
+            if not member:
+                raise PermissionDenied("No member profile is linked to your account.")
+            target_member_id = member.id
+        else:
+            if requested_member_id:
+                target_member_id = requested_member_id
+            else:
+                member = Member.objects.filter(user=request.user).first()
+                if not member:
+                    return Response(
+                        {"detail": "member_id is required for this account."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                target_member_id = member.id
+
+        history = BorrowingHistory.objects.filter(member_id=target_member_id).values(
+            "book_id", "book__category_id", "book__author_id"
+        )
+        active = Borrowing.objects.filter(member_id=target_member_id).values(
+            "book_id", "book__category_id", "book__author_id"
+        )
+
+        seen_book_ids = {row["book_id"] for row in history} | {row["book_id"] for row in active}
+
+        category_weights = {}
+        author_weights = {}
+        for row in list(history) + list(active):
+            category_id = row["book__category_id"]
+            author_id = row["book__author_id"]
+            if category_id:
+                category_weights[category_id] = category_weights.get(category_id, 0) + 3
+            if author_id:
+                author_weights[author_id] = author_weights.get(author_id, 0) + 2
+
+        score_expr = Value(0, output_field=IntegerField())
+        for category_id, weight in category_weights.items():
+            score_expr = score_expr + Case(
+                When(category_id=category_id, then=Value(weight)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )
+        for author_id, weight in author_weights.items():
+            score_expr = score_expr + Case(
+                When(author_id=author_id, then=Value(weight)),
+                default=Value(0),
+                output_field=IntegerField(),
+            )
+
+        recommendations_qs = (
+            BOOK.objects.filter(quantity__gt=0)
+            .exclude(id__in=seen_book_ids)
+            .annotate(ai_score=score_expr, popularity=Count("borrowinghistory"))
+            .order_by("-ai_score", "-popularity", "title")
+        )
+
+        recommendations = list(
+            recommendations_qs.values(
+                "id",
+                "title",
+                "isbn",
+                "quantity",
+                "category__name",
+                "author__name",
+                "publisher__name",
+                "ai_score",
+                "popularity",
+            )[:limit]
+        )
+
+        if not recommendations:
+            recommendations = list(
+                BOOK.objects.filter(quantity__gt=0)
+                .annotate(popularity=Count("borrowinghistory"))
+                .order_by("-popularity", "-quantity", "title")
+                .values(
+                    "id",
+                    "title",
+                    "isbn",
+                    "quantity",
+                    "category__name",
+                    "author__name",
+                    "publisher__name",
+                    "popularity",
+                )[:limit]
+            )
+            for item in recommendations:
+                item["ai_score"] = 0
+
+        return Response(
+            {
+                "member_id": target_member_id,
+                "algorithm": "Weighted content-based filtering (category + author + popularity)",
+                "recommendations": recommendations,
+            }
+        )
 

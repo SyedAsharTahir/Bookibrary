@@ -36,9 +36,9 @@ class BorrowingSerializer(serializers.ModelSerializer):
             'book_title',
             'member',
             'member_name',
-            'borrow_date',
-            'due_date',
-            'return_date',
+            'borrowDate',
+            'dueDate',
+            'returnDate',
             'returned'
         ]
 class ReservationSerializer(serializers.ModelSerializer):
@@ -54,7 +54,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             'member',
             'member_name',
             'status',
-            'reserved_date'
+            'reservedDate'
         ]
 class FineSerializer(serializers.ModelSerializer):
     borrowing_id = serializers.IntegerField(source='borrowing.id', read_only=True)
@@ -70,7 +70,7 @@ class FineSerializer(serializers.ModelSerializer):
             'member_name',
             'book_title',
             'amount',
-            'issued_date',
+            'issuedDate',
             'paid'
         ]
 

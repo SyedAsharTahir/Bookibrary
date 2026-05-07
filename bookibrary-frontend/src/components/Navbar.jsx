@@ -47,6 +47,9 @@ function Navbar() {
           <NavLink to="/books" className={linkClass}>
             📚 {open && "Books"}
           </NavLink>
+          <NavLink to="/recommendations" className={linkClass}>
+            🤖 {open && "AI Recs"}
+          </NavLink>
           <NavLink to="/reservations" className={linkClass}>
             📌 {open && "Reservations"}
           </NavLink>

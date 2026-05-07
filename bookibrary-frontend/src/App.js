@@ -15,6 +15,7 @@ import Publisher from "./pages/Publisher";
 import Author from "./pages/Author"; 
 import Layout from "./components/Layout";
 import Dashboard from "./pages/DashBoard";
+import Recommendations from "./pages/Recommendations";
 import { getRole } from "./auth";
 
 function RoleProtection({ children, roles }) {
@@ -53,6 +54,7 @@ function App() {
             }
           />
           <Route path="books" element={<Books />} />
+          <Route path="recommendations" element={<Recommendations />} />
           <Route path="borrowing" element={<Borrowing />} />
           <Route path="reservations" element={<Reservation />} />
           <Route
