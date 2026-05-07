@@ -200,13 +200,13 @@ Recommend books to users based on their past borrowing patterns and content simi
 
 ### 11.2 AI Method Used
 
-The implemented method is a **weighted content-based filtering approach**:
+The implemented method is a **hybrid recommender**:
 
-- Higher weight if a candidate book belongs to categories frequently borrowed by the member.
-- Medium weight if a candidate book is by authors frequently borrowed by the member.
-- Popularity tie-breaker based on borrowing history count.
+- **Content-based component:** higher score for books matching categories/authors frequently seen in the member's borrowing data.
+- **Collaborative component:** user-to-user similarity is computed with cosine similarity on category interaction vectors.
+- **Hybrid ranking:** final score combines content score and collaborative score, with popularity as a tie-break signal.
 - Already seen/borrowed books are excluded from recommendations.
-- If no history exists, the system falls back to globally popular available books.
+- If no useful history exists, the system falls back to globally popular available books.
 
 ### 11.3 AI Endpoint and Integration
 
@@ -220,6 +220,7 @@ The implemented method is a **weighted content-based filtering approach**:
 The recommendation module can be evaluated using:
 
 - Precision@K (how many suggested books are later borrowed)
+- Recall@K
 - Click/selection rate on recommended books
 - Average API response time per recommendation request
 - User-level qualitative feedback on recommendation relevance

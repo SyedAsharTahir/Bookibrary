@@ -649,6 +649,7 @@ class RecommendationView(APIView):
 
         seen_book_ids = {row["book_id"] for row in history} | {row["book_id"] for row in active}
 
+        # Content-based profile from this member's own interactions.
         category_weights = {}
         author_weights = {}
         for row in list(history) + list(active):
@@ -658,6 +659,61 @@ class RecommendationView(APIView):
                 category_weights[category_id] = category_weights.get(category_id, 0) + 3
             if author_id:
                 author_weights[author_id] = author_weights.get(author_id, 0) + 2
+
+        # Medium upgrade: collaborative filtering using member-to-member cosine similarity.
+        # We build category-frequency vectors from borrowing history and active borrowings.
+        member_category_counts = {}
+        history_rows = BorrowingHistory.objects.values("member_id", "book__category_id")
+        active_rows = Borrowing.objects.values("member_id", "book__category_id")
+        for row in list(history_rows) + list(active_rows):
+            member_id = row["member_id"]
+            category_id = row["book__category_id"]
+            if not category_id:
+                continue
+            if member_id not in member_category_counts:
+                member_category_counts[member_id] = {}
+            member_category_counts[member_id][category_id] = (
+                member_category_counts[member_id].get(category_id, 0) + 1
+            )
+
+        target_vector = member_category_counts.get(int(target_member_id), {})
+
+        def cosine_similarity(vec_a, vec_b):
+            if not vec_a or not vec_b:
+                return 0.0
+            shared_keys = set(vec_a.keys()) & set(vec_b.keys())
+            dot = sum(vec_a[key] * vec_b[key] for key in shared_keys)
+            mag_a = sum(value * value for value in vec_a.values()) ** 0.5
+            mag_b = sum(value * value for value in vec_b.values()) ** 0.5
+            if mag_a == 0 or mag_b == 0:
+                return 0.0
+            return dot / (mag_a * mag_b)
+
+        similar_members = []
+        for member_id, vector in member_category_counts.items():
+            if str(member_id) == str(target_member_id):
+                continue
+            similarity = cosine_similarity(target_vector, vector)
+            if similarity > 0:
+                similar_members.append((member_id, similarity))
+        similar_members.sort(key=lambda item: item[1], reverse=True)
+        top_similar_members = similar_members[:10]
+
+        collaborative_book_scores = {}
+        if top_similar_members:
+            member_similarity = {member_id: sim for member_id, sim in top_similar_members}
+            similar_member_ids = list(member_similarity.keys())
+
+            similar_member_books = BorrowingHistory.objects.filter(
+                member_id__in=similar_member_ids
+            ).values("member_id", "book_id")
+            for row in similar_member_books:
+                book_id = row["book_id"]
+                if book_id in seen_book_ids:
+                    continue
+                collaborative_book_scores[book_id] = collaborative_book_scores.get(book_id, 0) + (
+                    member_similarity.get(row["member_id"], 0) * 10
+                )
 
         score_expr = Value(0, output_field=IntegerField())
         for category_id, weight in category_weights.items():
@@ -694,6 +750,18 @@ class RecommendationView(APIView):
             )[:limit]
         )
 
+        # Blend collaborative score with existing content score.
+        for item in recommendations:
+            collab_score = collaborative_book_scores.get(item["id"], 0)
+            item["collaborative_score"] = round(collab_score, 2)
+            item["final_score"] = round(float(item["ai_score"]) + collab_score, 2)
+
+        recommendations.sort(
+            key=lambda row: (row["final_score"], row["popularity"], row["title"]),
+            reverse=True,
+        )
+        recommendations = recommendations[:limit]
+
         if not recommendations:
             recommendations = list(
                 BOOK.objects.filter(quantity__gt=0)
@@ -712,11 +780,13 @@ class RecommendationView(APIView):
             )
             for item in recommendations:
                 item["ai_score"] = 0
+                item["collaborative_score"] = 0
+                item["final_score"] = 0
 
         return Response(
             {
                 "member_id": target_member_id,
-                "algorithm": "Weighted content-based filtering (category + author + popularity)",
+                "algorithm": "Hybrid recommender (content-based + collaborative filtering + popularity)",
                 "recommendations": recommendations,
             }
         )
