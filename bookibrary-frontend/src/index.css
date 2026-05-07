@@ -3,17 +3,32 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #000000;
-  /* Add the rest of your color variables from the file you shared here */
-  --primary: hsl(0, 100%, 43%);
-  --border: #000000;
-  /* Keeping these variables is what makes the theme look "brutalist/modern" */
-  --shadow: 3px 3px 0px 0px hsl(0 0% 0% / 1.00); 
+  --background: #f4f7fb;
+  --foreground: #0f172a;
+  --primary: #4f46e5;
+  --primary-strong: #4338ca;
+  --border: #d6deeb;
+  --card: #ffffff;
+  --muted: #eef2ff;
+  --destructive: #dc2626;
 }
 
 @layer base {
+  * {
+    @apply box-border;
+  }
+
   body {
-    @apply bg-[var(--background)] text-[var(--foreground)] font-sans;
+    @apply m-0 min-h-screen bg-[var(--background)] text-[var(--foreground)] font-sans antialiased;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply rounded-lg border border-border bg-white px-3 py-2 text-sm outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100;
+  }
+
+  button {
+    @apply transition;
   }
 }

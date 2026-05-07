@@ -34,22 +34,20 @@ function Home() {
 
     return (
         <div>
-            {/* Hero */}
-            <div className="bg-primary text-white py-16 px-8 text-center mb-10 border border-border shadow-md">
+            <div className="mb-10 rounded-2xl border border-border bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-500 px-8 py-16 text-center text-white shadow-lg">
                 <h1 className="text-4xl md:text-5xl font-bold mb-3 min-h-[3rem]">
                     {displayed}<span className="animate-pulse">|</span>
                 </h1>
-                <p className="text-white/70 text-lg">Your modern library management system</p>
+                <p className="text-white/85 text-lg">Your modern library management system</p>
             </div>
 
-            {/* Stats */}
             <h2 className="text-2xl font-bold mb-6">Library Overview</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                 {cards.map(card => (
-                    <div key={card.label} className="border border-border shadow-md p-6 flex flex-col items-center bg-card hover:bg-muted transition">
+                    <div key={card.label} className="rounded-xl border border-border bg-card p-6 shadow-sm hover:shadow-md transition">
                         <span className="text-4xl mb-2">{card.icon}</span>
-                        <span className="text-3xl font-bold">{card.value}</span>
-                        <span className="text-sm mt-1 text-gray-500">{card.label}</span>
+                        <span className="text-3xl font-bold text-slate-800">{card.value}</span>
+                        <span className="text-sm mt-1 text-slate-500">{card.label}</span>
                     </div>
                 ))}
             </div>

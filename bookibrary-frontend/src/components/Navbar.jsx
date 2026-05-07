@@ -8,6 +8,7 @@ function Navbar() {
   const role = getRole();
   const name = getName();
 
+  const isAdmin = role === "admin";
   const isAdminOrLibrarian = role === "admin" || role === "librarian";
   const linkBase =
     "flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 relative";
@@ -41,9 +42,11 @@ function Navbar() {
           <NavLink to="/" className={linkClass}>
             🏠 {open && "Home"}
           </NavLink>
-          <NavLink to="/dashboard" className={linkClass}>
-            📊 {open && "Dashboard"}
-          </NavLink>
+          {isAdminOrLibrarian && (
+            <NavLink to="/dashboard" className={linkClass}>
+              📊 {open && "Dashboard"}
+            </NavLink>
+          )}
           <NavLink to="/books" className={linkClass}>
             📚 {open && "Books"}
           </NavLink>
@@ -61,20 +64,24 @@ function Navbar() {
           </NavLink>
 
           {isAdminOrLibrarian && (
-            <>
-              <NavLink to="/fines" className={linkClass}>
-                💰 {open && "Fines"}
-              </NavLink>
-              <NavLink to="/members" className={linkClass}>
-                👥 {open && "Members"}
-              </NavLink>
-              <NavLink to="/finepolicy" className={linkClass}>
-                📜 {open && "Fine Policy"}
-              </NavLink>
-              <NavLink to="/borrowinghistory" className={linkClass}>
-                📈 {open && "History"}
-              </NavLink>
-            </>
+            <NavLink to="/fines" className={linkClass}>
+              💰 {open && "Fines"}
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/members" className={linkClass}>
+              👥 {open && "Members"}
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/finepolicy" className={linkClass}>
+              📜 {open && "Fine Policy"}
+            </NavLink>
+          )}
+          {isAdminOrLibrarian && (
+            <NavLink to="/borrowinghistory" className={linkClass}>
+              📈 {open && "History"}
+            </NavLink>
           )}
 
           <NavLink to="/category" className={linkClass}>
