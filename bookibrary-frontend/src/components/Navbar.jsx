@@ -80,12 +80,16 @@ function Navbar() {
           <NavLink to="/category" className={linkClass}>
             🗂 {open && "Category"}
           </NavLink>
-          <NavLink to="/authors" className={linkClass}>
-            ✍️ {open && "Authors"}
-          </NavLink>
-          <NavLink to="/publishers" className={linkClass}>
-            🏢 {open && "Publishers"}
-          </NavLink>
+          {isAdminOrLibrarian && (
+            <>
+              <NavLink to="/authors" className={linkClass}>
+                ✍️ {open && "Authors"}
+              </NavLink>
+              <NavLink to="/publishers" className={linkClass}>
+                🏢 {open && "Publishers"}
+              </NavLink>
+            </>
+          )}
         </nav>
       </div>
 
