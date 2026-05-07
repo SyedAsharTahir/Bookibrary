@@ -3,10 +3,14 @@ import API from "../api/axios";
 import DataTable from "../components/DataTable";
 import LoadingSpinner from "../components/LoadingSpinner";
 import TableSkeleton from "../components/TableSkeleton";
+import { getRole } from "../auth";
 
 function Books() {
     const [books, setBooks] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const role = getRole();
+    const canManageBooks = role === "admin" || role === "librarian";
     const [form, setForm] = useState({
         title: '', author: '', isbn: '', quantity: 1, published_date: ''
     });
@@ -28,10 +32,38 @@ function Books() {
         API.delete(`books/${id}/`).then(() => fetchBooks()).catch(error => console.log(error));
     }
     const SendToDjango = () => {
-        API.post('books/', form).then(() => {
+        if (!canManageBooks) {
+            setError("Only admin or librarian can add books.");
+            return;
+        }
+
+        setError("");
+        const payload = {
+            ...form,
+            quantity: Number(form.quantity) || 1,
+        };
+
+        if (form.author === "") {
+            payload.author = null;
+        } else {
+            const parsedAuthor = Number(form.author);
+            if (Number.isNaN(parsedAuthor)) {
+                setError("Author must be a numeric author ID (example: 1).");
+                return;
+            }
+            payload.author = parsedAuthor;
+        }
+
+        API.post('books/', payload).then(() => {
             fetchBooks();
             setForm({ title: '', author: '', isbn: '', quantity: 1, published_date: '' });
-        }).catch(error => console.log(error));
+        }).catch(error => {
+            const message =
+                error?.response?.data?.detail ||
+                JSON.stringify(error?.response?.data) ||
+                "Failed to add book.";
+            setError(message);
+        });
     }
 
 return (
@@ -41,10 +73,20 @@ return (
             {/* Form Section */}
             <div className="bg-card border border-border p-6 mb-8 shadow-md">
                 <h2 className="text-xl font-semibold mb-4">Add New Book</h2>
+                {error && (
+                    <div className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-700">
+                        {error}
+                    </div>
+                )}
+                {!canManageBooks && (
+                    <div className="mb-4 rounded border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-700">
+                        Your role cannot add books. Login as admin or librarian.
+                    </div>
+                )}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <input name="title" placeholder="Title" value={form.title} onChange={Change}
                         className="border border-border p-2 focus:outline-primary" />
-                    <input name="author" placeholder="Author" value={form.author} onChange={Change}
+                    <input name="author" placeholder="Author ID (optional)" value={form.author} onChange={Change}
                         className="border border-border p-2 focus:outline-primary" />
                     <input name="isbn" placeholder="ISBN" value={form.isbn} onChange={Change}
                         className="border border-border p-2 focus:outline-primary" />
