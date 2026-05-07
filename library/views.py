@@ -25,6 +25,9 @@ def get_role(request):
             return "admin"
         return "member"
 
+def get_member_for_user(user):
+    return Member.objects.filter(user=user).first()
+
 
 class CustomTokenView(TokenObtainPairView):
     serializer_class = CustomTokenSerializer
@@ -34,6 +37,8 @@ class DashboardStatsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only admin or librarian can view dashboard stats.")
         stats = {
             "total_books": BOOK.objects.count(),
             "total_members": Member.objects.count(),
@@ -69,6 +74,14 @@ class MemberViewSet(viewsets.ModelViewSet):
     queryset = Member.objects.all()
     serializer_class = MemberSerializer
 
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return Member.objects.all()
+        if role == "member":
+            return Member.objects.filter(user=self.request.user)
+        return Member.objects.none()
+
     def destroy(self, request, pk=None):
         if get_role(request) != "admin":
             raise PermissionDenied("Only admins can delete members.")
@@ -98,15 +111,76 @@ class MemberViewSet(viewsets.ModelViewSet):
         serializer = MemberSerializer(member)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    def update(self, request, *args, **kwargs):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admins can update members.")
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admins can update members.")
+        return super().partial_update(request, *args, **kwargs)
+
 
 class ReservationViewSet(viewsets.ModelViewSet):
     queryset = Reservation.objects.all()
     serializer_class = ReservationSerializer
 
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return Reservation.objects.all()
+        if role == "member":
+            member = get_member_for_user(self.request.user)
+            if not member:
+                return Reservation.objects.none()
+            return Reservation.objects.filter(member=member)
+        return Reservation.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        role = get_role(request)
+        if role == "member":
+            member = get_member_for_user(request.user)
+            if not member:
+                raise PermissionDenied("No member profile is linked to your account.")
+            requested_member_id = request.data.get("member")
+            if requested_member_id and str(requested_member_id) != str(member.id):
+                raise PermissionDenied("You can only create reservations for yourself.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        role = get_role(request)
+        if role == "member":
+            obj = self.get_object()
+            member = get_member_for_user(request.user)
+            if not member or obj.member_id != member.id:
+                raise PermissionDenied("You can only update your own reservations.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        role = get_role(request)
+        if role == "member":
+            obj = self.get_object()
+            member = get_member_for_user(request.user)
+            if not member or obj.member_id != member.id:
+                raise PermissionDenied("You can only delete your own reservations.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class FineViewSet(viewsets.ModelViewSet):
     queryset = Fine.objects.all()
     serializer_class = FineSerializer
+
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return Fine.objects.all()
+        if role == "member":
+            member = get_member_for_user(self.request.user)
+            if not member:
+                return Fine.objects.none()
+            return Fine.objects.filter(borrowing__member=member)
+        return Fine.objects.none()
 
     def create(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
@@ -122,6 +196,32 @@ class FineViewSet(viewsets.ModelViewSet):
 class BorrowingViewSet(viewsets.ModelViewSet):
     queryset = Borrowing.objects.all()
     serializer_class = BorrowingSerializer
+
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return Borrowing.objects.all()
+        if role == "member":
+            member = get_member_for_user(self.request.user)
+            if not member:
+                return Borrowing.objects.none()
+            return Borrowing.objects.filter(member=member)
+        return Borrowing.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can create borrowings.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can update borrowings.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete borrowings.")
+        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"])
     def return_book(self, request, pk=None):
@@ -164,35 +264,187 @@ class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
 
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can add categories.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can update categories.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete categories.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class FinePolicyViewSet(viewsets.ModelViewSet):
     queryset = FinePolicy.objects.all()
     serializer_class = FinePolicySerializer
+
+    def create(self, request, *args, **kwargs):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admin can add fine policies.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admin can update fine policies.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) != "admin":
+            raise PermissionDenied("Only admin can delete fine policies.")
+        return super().destroy(request, *args, **kwargs)
 
 
 class NotificationViewSet(viewsets.ModelViewSet):
     queryset = Notification.objects.all()
     serializer_class = NotificationSerializer
 
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return Notification.objects.all()
+        if role == "member":
+            member = get_member_for_user(self.request.user)
+            if not member:
+                return Notification.objects.none()
+            return Notification.objects.filter(member=member)
+        return Notification.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can create notifications.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        role = get_role(request)
+        if role == "member":
+            obj = self.get_object()
+            member = get_member_for_user(request.user)
+            if not member or obj.member_id != member.id:
+                raise PermissionDenied("You can only update your own notifications.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete notifications.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class BorrowingHistoryViewSet(viewsets.ModelViewSet):
     queryset = BorrowingHistory.objects.all()
     serializer_class = BorrowingHistorySerializer
+
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return BorrowingHistory.objects.all()
+        if role == "member":
+            member = get_member_for_user(self.request.user)
+            if not member:
+                return BorrowingHistory.objects.none()
+            return BorrowingHistory.objects.filter(member=member)
+        return BorrowingHistory.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can create borrowing history records.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can update borrowing history records.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete borrowing history records.")
+        return super().destroy(request, *args, **kwargs)
 
 
 class AuthorViewSet(viewsets.ModelViewSet):
     queryset = Author.objects.all()
     serializer_class = AuthorSerializer
 
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can add authors.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can update authors.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete authors.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class PublisherViewSet(viewsets.ModelViewSet):
     queryset = Publisher.objects.all()
     serializer_class = PublisherSerializer
 
+    def create(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can add publishers.")
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can update publishers.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete publishers.")
+        return super().destroy(request, *args, **kwargs)
+
 
 class FinePaymentViewSet(viewsets.ModelViewSet):
     queryset = FinePayment.objects.all()
     serializer_class = FinePaymentSerializer
+
+    def get_queryset(self):
+        role = get_role(self.request)
+        if role in ["admin", "librarian"]:
+            return FinePayment.objects.all()
+        if role == "member":
+            member = get_member_for_user(self.request.user)
+            if not member:
+                return FinePayment.objects.none()
+            return FinePayment.objects.filter(fine__borrowing__member=member)
+        return FinePayment.objects.none()
+
+    def create(self, request, *args, **kwargs):
+        role = get_role(request)
+        if role in ["admin", "librarian"]:
+            return super().create(request, *args, **kwargs)
+        if role == "member":
+            fine_id = request.data.get("fine")
+            member = get_member_for_user(request.user)
+            if not member:
+                raise PermissionDenied("No member profile is linked to your account.")
+            allowed = Fine.objects.filter(id=fine_id, borrowing__member=member).exists()
+            if not allowed:
+                raise PermissionDenied("You can only pay your own fines.")
+            return super().create(request, *args, **kwargs)
+        raise PermissionDenied("Unauthorized role.")
+
+    def update(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can update fine payments.")
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only staff can delete fine payments.")
+        return super().destroy(request, *args, **kwargs)
 
 
 class AdminReportView(APIView):
