@@ -638,6 +638,44 @@ class BookViewSet(viewsets.ModelViewSet):
             return BookListSerializer
         return BookSerializer
 
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated])
+    def generate_summary(self, request, pk=None):
+        if get_role(request) not in ["admin", "librarian"]:
+            raise PermissionDenied("Only admin or librarian can generate AI summaries.")
+        
+        book = self.get_object()
+        
+        try:
+            # Generate AI summary using existing function
+            summary = generate_book_summary(
+                book.title,
+                book.author.name if book.author else 'Unknown Author',
+                book.category.name if book.category else 'Uncategorized'
+            )
+            
+            logger.info(f"Generated summary for book {book.id}: {summary[:100]}...")
+            
+            # Update the book with the new summary
+            book.summary = summary
+            book.save(update_fields=['summary'])
+            
+            # Verify the save
+            book.refresh_from_db()
+            logger.info(f"Verified saved summary for book {book.id}: {book.summary[:100] if book.summary else 'None'}...")
+            
+            return Response({
+                'success': True,
+                'summary': summary,
+                'message': 'AI summary generated successfully.'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error generating AI summary for book {book.id}: {str(e)}")
+            return Response({
+                'success': False,
+                'error': 'Failed to generate AI summary. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def create(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
             raise PermissionDenied("You do not have permission to add books.")

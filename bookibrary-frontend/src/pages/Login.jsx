@@ -10,8 +10,8 @@ function Login(){
     e.preventDefault();
     try{
         const result=await axios.post('http://127.0.0.1:8000/api/token/',form);//endpoint
-        localStorage.setItem('access',result.data.access);//save the token
-        localStorage.setItem('refresh',result.data.refresh);//save refresh token
+        localStorage.setItem('accessToken',result.data.access);//save token
+        localStorage.setItem('refreshToken',result.data.refresh);//save refresh token
         window.location.href='/';//redirect to home page
         console.log(result.data);
     }catch(error){

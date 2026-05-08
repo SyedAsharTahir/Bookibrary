@@ -22,7 +22,7 @@ class BookListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BOOK
-        fields = ['id', 'title', 'author_name', 'category_name', 'publisher_name', 'isbn', 'quantity', 'published_date']
+        fields = ['id', 'title', 'author_name', 'category_name', 'publisher_name', 'isbn', 'quantity', 'published_date', 'summary']
 
 class BookSerializer(serializers.ModelSerializer):
     author_name = serializers.CharField(write_only=True, required=False)
