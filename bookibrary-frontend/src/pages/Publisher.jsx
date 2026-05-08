@@ -3,23 +3,10 @@ import API from "../api/axios"; // Ensure your axios instance is set up
 
 const Publisher = () => {
     const [list, setList] = useState([]);
-    const [name, setName] = useState("");
 
     const fetchData = async () => {
         const res = await API.get('publishers/');
         setList(res.data);
-    };
-
-   const handleAdd = async (e) => {
-        e.preventDefault();
-        if (!name.trim()) return; // Simple validation
-        try {
-            await API.post('publishers/', { name });
-            setName("");
-            fetchData();
-        } catch (error) {
-            console.error("Error adding publisher:", error);
-        }
     };
 
     useEffect(() => {
@@ -28,23 +15,13 @@ const Publisher = () => {
 
    return (
         <div className="p-8">
-            {/* 2. Updated header text */}
-            <h1 className="text-2xl font-bold mb-4">Manage Publishers</h1>
-            
-            <form onSubmit={handleAdd} className="mb-6 flex gap-2">
-                <input 
-                    className="border p-2 rounded"
-                    placeholder="Publisher Name" 
-                    value={name} 
-                    onChange={(e) => setName(e.target.value)} 
-                />
-                <button className="bg-blue-600 text-white px-4 py-2 rounded">Add Publisher</button>
-            </form>
+            <h1 className="text-2xl font-bold mb-4">View Publishers</h1>
+            <p className="text-gray-600 mb-6">Publishers are automatically created when books are added to the system.</p>
 
             <table className="w-full border">
                 <thead>
                     <tr className="bg-gray-100">
-                        <th className="p-2">Name</th>
+                        <th className="p-2 text-left">Name</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -55,6 +32,13 @@ const Publisher = () => {
                     ))}
                 </tbody>
             </table>
+            
+            {list.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                    <p>No publishers found.</p>
+                    <p className="text-sm mt-2">Publishers will appear here when books are added to the system.</p>
+                </div>
+            )}
         </div>
     );
 };

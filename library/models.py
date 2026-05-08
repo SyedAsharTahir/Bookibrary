@@ -25,14 +25,28 @@ class Publisher(models.Model):
         return self.name
 
 class BOOK(models.Model):
-    title=models.CharField(max_length=2000)
-    author=models.ForeignKey(Author,on_delete=models.CASCADE,null=True,blank=True)
-    publisher=models.ForeignKey(Publisher,on_delete=models.SET_NULL,null=True,blank=True)
-    isbn=models.CharField(max_length=20,unique=True)
+    title=models.CharField(max_length=2000, db_index=True)
+    author=models.ForeignKey(Author,on_delete=models.CASCADE,null=True,blank=True, db_index=True)
+    publisher=models.ForeignKey(Publisher,on_delete=models.CASCADE,null=True,blank=True, db_index=True)
+    isbn=models.CharField(max_length=20,blank=True, db_index=True)
     quantity=models.IntegerField(default=1)
-    published_date=models.DateField(null=True)#store empty value as NULL in Database
-    category=models.ForeignKey(Category,on_delete=models.SET_NULL,null=True,blank=True)#can be empty in forms and stored as null in DB
+    published_date=models.DateField(null=True, db_index=True)#store empty value as NULL in Database
+    category=models.ForeignKey(Category,on_delete=models.CASCADE,null=True,blank=True, db_index=True)#can be empty in forms and stored as null in DB
+    description=models.TextField(blank=True)
+    summary=models.TextField(blank=True)
+    cover_url=models.URLField(blank=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['title']),
+            models.Index(fields=['author']),
+            models.Index(fields=['category']),
+            models.Index(fields=['publisher']),
+            models.Index(fields=['isbn']),
+            models.Index(fields=['published_date']),
+            models.Index(fields=['title', 'author']),
+            models.Index(fields=['category', 'published_date']),
+        ]
     
     def __str__(self):
         return self.title

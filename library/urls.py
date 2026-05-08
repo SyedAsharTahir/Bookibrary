@@ -22,5 +22,5 @@ urlpatterns = [
     path("reports/admin/", views.AdminReportView.as_view(), name="admin-report"),
     path("reports/librarian/", views.LibrarianReportView.as_view(), name="librarian-report"),
     path("reports/member/", views.MemberReportView.as_view(), name="member-report"),
-    path("recommendations/", views.RecommendationView.as_view(), name="recommendations"),
+    path("chat/", views.ChatView.as_view(), name="chat"),
 ]

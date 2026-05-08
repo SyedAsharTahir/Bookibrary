@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { getRole, getName, logOut } from "../auth";
 
-function Navbar() {
+function Navbar({ onToggle }) {
   const [open, setOpen] = useState(true);
 
   const role = getRole();
@@ -20,7 +20,7 @@ function Navbar() {
 
   return (
     <div
-      className={`h-screen bg-gray-900 text-white flex flex-col justify-between transition-all duration-300 ${
+      className={`h-screen bg-gray-900 text-white flex flex-col justify-between transition-all duration-300 fixed left-0 top-0 z-50 ${
         open ? "w-64" : "w-20"
       }`}
     >
@@ -31,7 +31,10 @@ function Navbar() {
           </span>
 
           <button
-            onClick={() => setOpen(!open)}
+            onClick={() => {
+              setOpen(!open);
+              if (onToggle) onToggle();
+            }}
             className="text-gray-400 hover:text-white transition"
           >
             ☰
@@ -50,8 +53,8 @@ function Navbar() {
           <NavLink to="/books" className={linkClass}>
             📚 {open && "Books"}
           </NavLink>
-          <NavLink to="/recommendations" className={linkClass}>
-            🤖 {open && "AI Recs"}
+          <NavLink to="/chatbot" className={linkClass}>
+            💬 {open && "AI Chat"}
           </NavLink>
           <NavLink to="/reservations" className={linkClass}>
             📌 {open && "Reservations"}

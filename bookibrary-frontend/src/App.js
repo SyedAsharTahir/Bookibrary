@@ -15,7 +15,7 @@ import Publisher from "./pages/Publisher";
 import Author from "./pages/Author"; 
 import Layout from "./components/Layout";
 import Dashboard from "./pages/DashBoard";
-import Recommendations from "./pages/Recommendations";
+import Chatbot from "./pages/Chatbot";
 import { getRole } from "./auth";
 
 function RoleProtection({ children, roles }) {
@@ -54,7 +54,7 @@ function App() {
             }
           />
           <Route path="books" element={<Books />} />
-          <Route path="recommendations" element={<Recommendations />} />
+          <Route path="chatbot" element={<Chatbot />} />
           <Route path="borrowing" element={<Borrowing />} />
           <Route path="reservations" element={<Reservation />} />
           <Route
@@ -75,6 +75,22 @@ function App() {
           />
           <Route path="category" element={<Category />} />
           <Route
+            path="authors"
+            element={
+              <RoleProtection roles={["admin", "librarian"]}>
+                <Author />
+              </RoleProtection>
+            }
+          />
+          <Route
+            path="publishers"
+            element={
+              <RoleProtection roles={["admin", "librarian"]}>
+                <Publisher />
+              </RoleProtection>
+            }
+          />
+          <Route
             path="finepolicy"
             element={
               <RoleProtection roles={["admin"]}>
@@ -91,22 +107,6 @@ function App() {
             }
           />
           <Route path="notifications" element={<Notification />} />
-          <Route
-            path="authors"
-            element={
-              <RoleProtection roles={["admin", "librarian"]}>
-                <Author />
-              </RoleProtection>
-            }
-          />
-          <Route
-            path="publishers"
-            element={
-              <RoleProtection roles={["admin", "librarian"]}>
-                <Publisher />
-              </RoleProtection>
-            }
-          />
           <Route path="*" element={<Navigate to="/" />} />
         </Route>
       </Routes>

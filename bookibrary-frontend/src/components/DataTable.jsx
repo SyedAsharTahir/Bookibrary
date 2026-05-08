@@ -5,6 +5,7 @@ const DataTable = ({
   columns,
   data,
   onDelete,
+  onEdit,
   emptyMessage = "No records found.",
   children,
 }) => (
@@ -17,14 +18,14 @@ const DataTable = ({
               {col}
             </th>
           ))}
-          {onDelete && <th className="px-4 py-3 font-semibold">Actions</th>}
+          {(onDelete || onEdit) && <th className="px-4 py-3 font-semibold">Actions</th>}
         </tr>
       </thead>
       <tbody>
         {data.length === 0 ? (
           <tr>
             <td
-              colSpan={columns.length + (onDelete ? 1 : 0)}
+              colSpan={columns.length + ((onDelete || onEdit) ? 1 : 0)}
               className="p-8 text-center text-sm text-slate-500"
             >
               {emptyMessage}
@@ -34,14 +35,24 @@ const DataTable = ({
           React.Children.map(children, (child, index) => (
             <tr key={data[index]?.id ?? index} className="border-b border-border text-sm hover:bg-muted/70">
               {child.props.children}
-              {onDelete && (
-                <td className="p-3">
-                  <button
-                    onClick={() => onDelete(data[index].id)}
-                    className="rounded-md bg-destructive px-3 py-1 text-xs font-medium text-white hover:opacity-90"
-                  >
-                    Delete
-                  </button>
+              {(onDelete || onEdit) && (
+                <td className="p-3 flex gap-2">
+                  {onEdit && (
+                    <button
+                      onClick={() => onEdit(data[index])}
+                      className="rounded-md bg-blue-500 px-3 py-1 text-xs font-medium text-white hover:opacity-90"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button
+                      onClick={() => onDelete(data[index].id)}
+                      className="rounded-md bg-destructive px-3 py-1 text-xs font-medium text-white hover:opacity-90"
+                    >
+                      Delete
+                    </button>
+                  )}
                 </td>
               )}
             </tr>

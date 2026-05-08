@@ -4,15 +4,593 @@ from django.db import connection, transaction
 from django.contrib.auth.models import User
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+import logging
+
 from django.utils import timezone
-from django.db.models import Count, Sum, Case, When, Value, IntegerField
+import re
+from django.db.models import Count, Sum, Case, When, Value, IntegerField, Q
 from django.db.models.functions import Coalesce
+from django.conf import settings
 from rest_framework.response import Response
 from .models import *
 from .serializers import *
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
+import requests
+import os
+
+logger = logging.getLogger(__name__)
+
+def generate_book_cover(title, author, category):
+    return f"https://via.placeholder.com/300x400?text={title.replace(' ', '+')}"
+
+def get_gemini_api_key():
+    return os.environ.get('GEMINI_API_KEY') or getattr(settings, 'GEMINI_API_KEY', None)
+
+def get_openai_api_key():
+    return os.environ.get('OPENAI_API_KEY') or getattr(settings, 'OPENAI_API_KEY', None)
+
+def call_local_ollama(prompt):
+    try:
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'llama3.2:1b',
+                'prompt': prompt,
+                'stream': False,
+            },
+            timeout=30,
+        )
+        if response.status_code == 200:
+            return response.json().get('response', '').strip()
+        logger.warning("Ollama local model returned %s: %s", response.status_code, response.text)
+        return None
+    except requests.RequestException:
+        logger.warning("Ollama local request failed")
+        return None
+
+def call_openai_chat(api_key, prompt):
+    url = 'https://api.openai.com/v1/chat/completions'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+    }
+    data = {
+        'model': 'gpt-3.5-turbo',
+        'messages': [
+            {'role': 'system', 'content': 'You are a helpful library assistant. Answer questions about books, borrowing rules, and provide assistance with library-related queries.'},
+            {'role': 'user', 'content': prompt},
+        ],
+        'max_tokens': 250,
+    }
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=10)
+        if response.status_code == 200:
+            return response.json()['choices'][0]['message']['content'].strip()
+        logger.warning("OpenAI chat returned %s: %s", response.status_code, response.text)
+        return None
+    except requests.RequestException:
+        logger.exception("OpenAI request failed")
+        return None
+
+def get_relevant_books_context(query, limit=5):
+    from django.db.models import Q
+
+    query_terms = query.strip()
+    books = BOOK.objects.filter(
+        Q(title__icontains=query_terms)
+        | Q(author__name__icontains=query_terms)
+        | Q(category__name__icontains=query_terms)
+        | Q(description__icontains=query_terms)
+    ).select_related('author', 'category')[:limit]
+
+    if not books:
+        books = BOOK.objects.select_related('author', 'category').all()[:limit]
+
+    rows = []
+    for book in books:
+        rows.append(
+            f"- Title: {book.title}\n  Author: {getattr(book.author, 'name', 'Unknown')}\n  "
+            f"Category: {getattr(book.category, 'name', 'Unknown')}\n  Quantity: {book.quantity}\n  "
+            f"Description: {book.description or 'No description available.'}"
+        )
+
+    return "\n".join(rows)
+
+
+def call_ai_text(prompt):
+    result = call_local_ollama(prompt)
+    if result:
+        return result
+
+    openai_key = get_openai_api_key()
+    if openai_key:
+        return call_openai_chat(openai_key, prompt)
+
+    return None
+
+def generate_book_description(title, author, category):
+    prompt = (
+        f'Generate a compelling book description for "{title}" by {author} '
+        f'in the {category} category. The description should be 2-3 sentences long, '
+        f'engaging, and suitable for library readers. Focus on the main themes, '
+        f'genre appeal, and what makes this book interesting. Avoid spoilers.'
+    )
+    result = call_ai_text(prompt)
+    return result or "Description not available."
+
+def generate_book_summary(title, author, category):
+    prompt = (
+        f'Generate a detailed book summary for "{title}" by {author} '
+        f'in the {category} category. The summary should be 4-6 sentences long, '
+        f'providing more depth than a description. Include the main plot points, '
+        f'key themes, and the overall reading experience. Avoid major spoilers '
+        f'but give readers a good understanding of what to expect.'
+    )
+    result = call_ai_text(prompt)
+    return result or "Summary not available."
+
+def generate_author_biography(author_name, books_written):
+    prompt = (
+        f'Generate a professional author biography for {author_name}. '
+        f'Known works include: {books_written}. '
+        f'The biography should be 3-4 sentences long, highlighting their writing style, '
+        f'major achievements, and significance in literature. Make it sound authoritative '
+        f'and suitable for a library system.'
+    )
+    result = call_ai_text(prompt)
+    return result or "Biography not available."
+
+def generate_book_cover(title, author, category):
+    """
+    Generate book cover using image generation API.
+    For now, returns a placeholder URL. In production, integrate with actual image generation API.
+    """
+    import hashlib
+    import urllib.parse
+    
+    # Create a unique identifier for this book
+    book_id = hashlib.md5(f"{title}_{author}_{category}".encode()).hexdigest()[:8]
+    
+    # Generate a prompt for image generation
+    prompt = f"Book cover for '{title}' by {author}, {category} genre, professional book design, minimalist, elegant"
+    
+    # For now, return a placeholder image URL with book-specific parameters
+    # In production, replace with actual API call to image generation service
+    placeholder_url = f"https://picsum.photos/seed/{book_id}/400/600.jpg"
+    
+    return {
+        'cover_url': placeholder_url,
+        'prompt_used': prompt,
+        'note': 'This is a placeholder. Integrate with image generation API for production.'
+    }
+
+
+def resolve_relation(model, value):
+    if not value:
+        return None
+    value = str(value).strip()
+    try:
+        return model.objects.get(pk=int(value))
+    except (ValueError, model.DoesNotExist):
+        return model.objects.filter(name__iexact=value).first()
+
+
+def format_book_summary(book):
+    return (
+        f"ID: {book.id} | Title: {book.title} | Author: {getattr(book.author, 'name', 'Unknown')} | "
+        f"Category: {getattr(book.category, 'name', 'Uncategorized')} | "
+        f"Publisher: {getattr(book.publisher, 'name', 'Unknown')} | ISBN: {book.isbn} | "
+        f"Qty: {book.quantity}"
+    )
+
+
+def list_books(query=None, limit=10):
+    books = BOOK.objects.select_related('author', 'category', 'publisher').all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['list books', 'show books', 'find books', 'search books']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        books = books.filter(
+            Q(title__icontains=search)
+            | Q(author__name__icontains=search)
+            | Q(category__name__icontains=search)
+            | Q(description__icontains=search)
+        )
+    books = books.order_by('title')[:limit]
+
+    if not books:
+        return "No matching books were found in the catalog."
+
+    return "\n".join(format_book_summary(book) for book in books)
+
+
+def parse_field(query, field_name):
+    regexes = [
+        rf'{field_name}\s*[:=]\s*"([^"]+)"',
+        rf'{field_name}\s*[:=]\s*([^,;\n]+)',
+    ]
+    for expr in regexes:
+        match = re.search(expr, query, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def create_book_from_command(query):
+    title = parse_field(query, 'title')
+    if not title:
+        return 'Please provide a book title using title:"..." or title:<name>.'
+
+    author_value = parse_field(query, 'author')
+    if not author_value:
+        return 'Please provide an author using author:"..." or author:<name>.'
+
+    category_value = parse_field(query, 'category')
+    if not category_value:
+        return 'Please provide a category using category:"..." or category:<name>.'
+
+    publisher_value = parse_field(query, 'publisher')
+    isbn = parse_field(query, 'isbn') or ''
+    quantity = parse_field(query, 'quantity') or '1'
+    published_date = parse_field(query, 'published_date') or parse_field(query, 'published')
+
+    # Resolve or create author
+    author = resolve_relation(Author, author_value)
+    if not author:
+        author = Author.objects.create(name=author_value)
+
+    # Resolve or create category
+    category = resolve_relation(Category, category_value)
+    if not category:
+        category = Category.objects.create(name=category_value)
+
+    # Resolve or create publisher if provided
+    publisher = None
+    if publisher_value:
+        publisher = resolve_relation(Publisher, publisher_value)
+        if not publisher:
+            publisher = Publisher.objects.create(name=publisher_value)
+
+    try:
+        quantity = int(quantity)
+    except ValueError:
+        quantity = 1
+
+    book = BOOK.objects.create(
+        title=title,
+        author=author,
+        category=category,
+        publisher=publisher,
+        isbn=isbn,
+        quantity=quantity,
+        published_date=published_date or None,
+    )
+
+    if not book.description:
+        book.description = generate_book_description(
+            book.title,
+            author.name if author else '',
+            category.name if category else '',
+        )
+    if not book.cover_url:
+        book.cover_url = generate_book_cover(
+            book.title,
+            author.name if author else '',
+            category.name if category else '',
+        )
+    book.save()
+    return f'Created book {book.title} (ID: {book.id}).'
+
+
+def update_book_from_command(query):
+    book_id = parse_field(query, 'id') or parse_field(query, 'book')
+    if not book_id:
+        return 'Please specify the book ID to update using id:<book_id> or book:<book_id>.'
+
+    try:
+        book = BOOK.objects.get(pk=int(book_id))
+    except (ValueError, BOOK.DoesNotExist):
+        return f'Book not found for ID {book_id}.'
+
+    title = parse_field(query, 'title')
+    author_value = parse_field(query, 'author')
+    category_value = parse_field(query, 'category')
+    publisher_value = parse_field(query, 'publisher')
+    isbn = parse_field(query, 'isbn')
+    quantity = parse_field(query, 'quantity')
+    published_date = parse_field(query, 'published_date') or parse_field(query, 'published')
+
+    if title:
+        book.title = title
+    if author_value is not None:
+        book.author = resolve_relation(Author, author_value)
+    if category_value is not None:
+        book.category = resolve_relation(Category, category_value)
+    if publisher_value is not None:
+        book.publisher = resolve_relation(Publisher, publisher_value)
+    if isbn is not None:
+        book.isbn = isbn
+    if quantity is not None:
+        try:
+            book.quantity = int(quantity)
+        except ValueError:
+            pass
+    if published_date is not None:
+        book.published_date = published_date
+
+    book.save()
+    return f'Updated book {book.title} (ID: {book.id}).'
+
+
+def delete_book_from_command(query):
+    book_id = parse_field(query, 'id') or parse_field(query, 'book')
+    if not book_id:
+        return 'Please specify the book ID to delete using id:<book_id> or book:<book_id>.'
+
+    try:
+        book = BOOK.objects.get(pk=int(book_id))
+    except (ValueError, BOOK.DoesNotExist):
+        return f'Book not found for ID {book_id}.'
+
+    title = book.title
+    book.delete()
+    return f'Deleted book {title} (ID: {book_id}).'
+
+
+def format_author_summary(author):
+    return f"ID: {author.id} | Name: {author.name}"
+
+
+def format_category_summary(category):
+    return f"ID: {category.id} | Name: {category.name}"
+
+
+def format_publisher_summary(publisher):
+    return f"ID: {publisher.id} | Name: {publisher.name}"
+
+
+def list_authors(query=None, limit=10):
+    authors = Author.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['list authors', 'show authors', 'find authors', 'search authors']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        authors = authors.filter(
+            Q(name__icontains=search) | Q(biography__icontains=search)
+        )
+    authors = authors.order_by('name')[:limit]
+    if not authors:
+        return 'No matching authors were found.'
+    return '\n'.join(format_author_summary(author) for author in authors)
+
+
+def list_categories(query=None, limit=10):
+    categories = Category.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['list categories', 'show categories', 'find categories', 'search categories']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        categories = categories.filter(
+            Q(name__icontains=search) | Q(description__icontains=search)
+        )
+    categories = categories.order_by('name')[:limit]
+    if not categories:
+        return 'No matching categories were found.'
+    return '\n'.join(format_category_summary(category) for category in categories)
+
+
+def list_publishers(query=None, limit=10):
+    publishers = Publisher.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['list publishers', 'show publishers', 'find publishers', 'search publishers']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        publishers = publishers.filter(
+            Q(name__icontains=search) | Q(address__icontains=search)
+        )
+    publishers = publishers.order_by('name')[:limit]
+    if not publishers:
+        return 'No matching publishers were found.'
+    return '\n'.join(format_publisher_summary(publisher) for publisher in publishers)
+
+
+def create_author_from_command(query):
+    name = parse_field(query, 'name')
+    if not name:
+        return 'Please provide an author name using name:"..." or name:<name>.'
+    biography = parse_field(query, 'biography') or ''
+    author = Author.objects.create(name=name, biography=biography)
+    return f'Created author {author.name} (ID: {author.id}).'
+
+
+def update_author_from_command(query):
+    author_id = parse_field(query, 'id') or parse_field(query, 'author')
+    if not author_id:
+        return 'Please specify the author ID to update using id:<author_id> or author:<author_id>.'
+    try:
+        author = Author.objects.get(pk=int(author_id))
+    except (ValueError, Author.DoesNotExist):
+        return f'Author not found for ID {author_id}.'
+    name = parse_field(query, 'name')
+    biography = parse_field(query, 'biography')
+    if name is not None:
+        author.name = name
+    if biography is not None:
+        author.biography = biography
+    author.save()
+    return f'Updated author {author.name} (ID: {author.id}).'
+
+
+def delete_author_from_command(query):
+    author_id = parse_field(query, 'id') or parse_field(query, 'author')
+    if not author_id:
+        return 'Please specify the author ID to delete using id:<author_id> or author:<author_id>.'
+    try:
+        author = Author.objects.get(pk=int(author_id))
+    except (ValueError, Author.DoesNotExist):
+        return f'Author not found for ID {author_id}.'
+    name = author.name
+    author.delete()
+    return f'Deleted author {name} (ID: {author_id}).'
+
+
+def create_category_from_command(query):
+    name = parse_field(query, 'name')
+    if not name:
+        return 'Please provide a category name using name:"..." or name:<name>.'
+    description = parse_field(query, 'description') or ''
+    category = Category.objects.create(name=name, description=description)
+    return f'Created category {category.name} (ID: {category.id}).'
+
+
+def update_category_from_command(query):
+    category_id = parse_field(query, 'id') or parse_field(query, 'category')
+    if not category_id:
+        return 'Please specify the category ID to update using id:<category_id> or category:<category_id>.'
+    try:
+        category = Category.objects.get(pk=int(category_id))
+    except (ValueError, Category.DoesNotExist):
+        return f'Category not found for ID {category_id}.'
+    name = parse_field(query, 'name')
+    description = parse_field(query, 'description')
+    if name is not None:
+        category.name = name
+    if description is not None:
+        category.description = description
+    category.save()
+    return f'Updated category {category.name} (ID: {category.id}).'
+
+
+def delete_category_from_command(query):
+    category_id = parse_field(query, 'id') or parse_field(query, 'category')
+    if not category_id:
+        return 'Please specify the category ID to delete using id:<category_id> or category:<category_id>.'
+    try:
+        category = Category.objects.get(pk=int(category_id))
+    except (ValueError, Category.DoesNotExist):
+        return f'Category not found for ID {category_id}.'
+    name = category.name
+    category.delete()
+    return f'Deleted category {name} (ID: {category_id}).'
+
+
+def create_publisher_from_command(query):
+    name = parse_field(query, 'name')
+    if not name:
+        return 'Please provide a publisher name using name:"..." or name:<name>.'
+    address = parse_field(query, 'address') or ''
+    publisher = Publisher.objects.create(name=name, address=address)
+    return f'Created publisher {publisher.name} (ID: {publisher.id}).'
+
+
+def update_publisher_from_command(query):
+    publisher_id = parse_field(query, 'id') or parse_field(query, 'publisher')
+    if not publisher_id:
+        return 'Please specify the publisher ID to update using id:<publisher_id> or publisher:<publisher_id>.'
+    try:
+        publisher = Publisher.objects.get(pk=int(publisher_id))
+    except (ValueError, Publisher.DoesNotExist):
+        return f'Publisher not found for ID {publisher_id}.'
+    name = parse_field(query, 'name')
+    address = parse_field(query, 'address')
+    if name is not None:
+        publisher.name = name
+    if address is not None:
+        publisher.address = address
+    publisher.save()
+    return f'Updated publisher {publisher.name} (ID: {publisher.id}).'
+
+
+def delete_publisher_from_command(query):
+    publisher_id = parse_field(query, 'id') or parse_field(query, 'publisher')
+    if not publisher_id:
+        return 'Please specify the publisher ID to delete using id:<publisher_id> or publisher:<publisher_id>.'
+    try:
+        publisher = Publisher.objects.get(pk=int(publisher_id))
+    except (ValueError, Publisher.DoesNotExist):
+        return f'Publisher not found for ID {publisher_id}.'
+    name = publisher.name
+    publisher.delete()
+    return f'Deleted publisher {name} (ID: {publisher_id}).'
+
+
+def handle_chat_crud(query, request):
+    lower = query.strip().lower()
+    if 'create book' in lower or 'add book' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can create books.'
+        return create_book_from_command(query)
+    if 'update book' in lower or 'edit book' in lower or 'change book' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can update books.'
+        return update_book_from_command(query)
+    if 'delete book' in lower or 'remove book' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can delete books.'
+        return delete_book_from_command(query)
+    if 'list books' in lower or 'show books' in lower or 'find books' in lower or 'search books' in lower:
+        return list_books(query)
+    if 'create author' in lower or 'add author' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can create authors.'
+        return create_author_from_command(query)
+    if 'update author' in lower or 'edit author' in lower or 'change author' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can update authors.'
+        return update_author_from_command(query)
+    if 'delete author' in lower or 'remove author' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can delete authors.'
+        return delete_author_from_command(query)
+    if 'list authors' in lower or 'show authors' in lower or 'find authors' in lower or 'search authors' in lower:
+        return list_authors(query)
+    if 'create category' in lower or 'add category' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can create categories.'
+        return create_category_from_command(query)
+    if 'update category' in lower or 'edit category' in lower or 'change category' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can update categories.'
+        return update_category_from_command(query)
+    if 'delete category' in lower or 'remove category' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can delete categories.'
+        return delete_category_from_command(query)
+    if 'list categories' in lower or 'show categories' in lower or 'find categories' in lower or 'search categories' in lower:
+        return list_categories(query)
+    if 'create publisher' in lower or 'add publisher' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can create publishers.'
+        return create_publisher_from_command(query)
+    if 'update publisher' in lower or 'edit publisher' in lower or 'change publisher' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can update publishers.'
+        return update_publisher_from_command(query)
+    if 'delete publisher' in lower or 'remove publisher' in lower:
+        if get_role(request) not in ['admin', 'librarian']:
+            return 'Only admin or librarian users can delete publishers.'
+        return delete_publisher_from_command(query)
+    if 'list publishers' in lower or 'show publishers' in lower or 'find publishers' in lower or 'search publishers' in lower:
+        return list_publishers(query)
+    return None
 
 
 def get_role(request):
@@ -50,24 +628,104 @@ class DashboardStatsView(APIView):
         }
         return Response(stats)
 
+
 class BookViewSet(viewsets.ModelViewSet):
-    queryset = BOOK.objects.all()
+    queryset = BOOK.objects.select_related('author', 'publisher', 'category').all()
     serializer_class = BookSerializer
+    
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return BookListSerializer
+        return BookSerializer
 
     def create(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
             raise PermissionDenied("You do not have permission to add books.")
-        return super().create(request, *args, **kwargs)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        book = serializer.save()
+
+        # Create notifications for all members (bulk create for performance)
+        message = f"New book added to the library: '{book.title}' by {book.author.name if book.author else 'Unknown Author'}"
+        members = Member.objects.values_list('id', flat=True)
+        notifications = [
+            Notification(member_id=member_id, message=message, type='general')
+            for member_id in members
+        ]
+        Notification.objects.bulk_create(notifications)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
             raise PermissionDenied("You do not have permission to update books.")
-        return super().update(request, *args, **kwargs)
+        book = self.get_object()
+        old_title = book.title
+        response = super().update(request, *args, **kwargs)
+        book.refresh_from_db()
+        if book.title != old_title:
+            # Create notifications for title change (bulk create for performance)
+            message = f"Book title updated: '{old_title}' is now '{book.title}'"
+            members = Member.objects.values_list('id', flat=True)
+            notifications = [
+                Notification(member_id=member_id, message=message, type='general')
+                for member_id in members
+            ]
+            Notification.objects.bulk_create(notifications)
+        return response
 
     def destroy(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
             raise PermissionDenied("You do not have permission to delete books.")
-        return super().destroy(request, *args, **kwargs)
+        book = self.get_object()
+        book_title = book.title
+        author_name = book.author.name if book.author else 'Unknown Author'
+
+        # Store references for cleanup
+        author_to_check = book.author
+        publisher_to_check = book.publisher
+        category_to_check = book.category
+
+        # Create notifications before deleting (bulk create for performance)
+        message = f"Book removed from the library: '{book_title}' by {author_name}"
+        members = Member.objects.values_list('id', flat=True)
+        notifications = [
+            Notification(member_id=member_id, message=message, type='general')
+            for member_id in members
+        ]
+        Notification.objects.bulk_create(notifications)
+
+        # Delete the book
+        response = super().destroy(request, *args, **kwargs)
+
+        # Clean up orphaned authors, publishers, and categories
+        # Only delete if they were automatically created and have no other books
+        
+        # Clean up orphaned authors
+        if author_to_check:
+            author_books_count = BOOK.objects.filter(author=author_to_check).count()
+            if author_books_count == 0:
+                # Check if this author has any biography (might be manually added)
+                if not author_to_check.biography or author_to_check.biography.strip() == '':
+                    author_to_check.delete()
+
+        # Clean up orphaned publishers
+        if publisher_to_check:
+            publisher_books_count = BOOK.objects.filter(publisher=publisher_to_check).count()
+            if publisher_books_count == 0:
+                # Check if this publisher has no address (might be manually added)
+                if not publisher_to_check.address or publisher_to_check.address.strip() == '':
+                    publisher_to_check.delete()
+
+        # Clean up orphaned categories (only if they have no description and no books)
+        if category_to_check:
+            category_books_count = BOOK.objects.filter(category=category_to_check).count()
+            if category_books_count == 0:
+                # Only delete auto-created categories (those without descriptions)
+                if not category_to_check.description or category_to_check.description.strip() == '':
+                    category_to_check.delete()
+
+        return response
 
 
 class MemberViewSet(viewsets.ModelViewSet):
@@ -264,21 +922,6 @@ class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
 
-    def create(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can add categories.")
-        return super().create(request, *args, **kwargs)
-
-    def update(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can update categories.")
-        return super().update(request, *args, **kwargs)
-
-    def destroy(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can delete categories.")
-        return super().destroy(request, *args, **kwargs)
-
 
 class FinePolicyViewSet(viewsets.ModelViewSet):
     queryset = FinePolicy.objects.all()
@@ -371,18 +1014,14 @@ class AuthorViewSet(viewsets.ModelViewSet):
     serializer_class = AuthorSerializer
 
     def create(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can add authors.")
-        return super().create(request, *args, **kwargs)
+        raise PermissionDenied("Authors cannot be created independently. They are created automatically when adding books.")
 
     def update(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can update authors.")
-        return super().update(request, *args, **kwargs)
+        raise PermissionDenied("Authors cannot be updated. Delete and recreate through book management.")
 
     def destroy(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can delete authors.")
+            raise PermissionDenied("Only admin or librarian can delete authors.")
         return super().destroy(request, *args, **kwargs)
 
 
@@ -391,18 +1030,14 @@ class PublisherViewSet(viewsets.ModelViewSet):
     serializer_class = PublisherSerializer
 
     def create(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can add publishers.")
-        return super().create(request, *args, **kwargs)
+        raise PermissionDenied("Publishers cannot be created independently. They are created automatically when adding books.")
 
     def update(self, request, *args, **kwargs):
-        if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can update publishers.")
-        return super().update(request, *args, **kwargs)
+        raise PermissionDenied("Publishers cannot be updated. Delete and recreate through book management.")
 
     def destroy(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
-            raise PermissionDenied("Only staff can delete publishers.")
+            raise PermissionDenied("Only admin or librarian can delete publishers.")
         return super().destroy(request, *args, **kwargs)
 
 
@@ -511,13 +1146,8 @@ class LibrarianReportView(APIView):
 
         book_inventory = list(
             books_qs.values(
-                "id",
-                "title",
-                "isbn",
-                "quantity",
-                "category__name",
-                "author__name",
-                "publisher__name",
+                "id", "title", "isbn", "quantity",
+                "category__name", "author__name", "publisher__name",
             ).order_by("title")
         )
 
@@ -527,11 +1157,7 @@ class LibrarianReportView(APIView):
 
         active_borrowings = list(
             borrowings_qs.values(
-                "id",
-                "book__title",
-                "member__name",
-                "borrowDate",
-                "dueDate",
+                "id", "book__title", "member__name", "borrowDate", "dueDate",
             ).order_by("dueDate")
         )
 
@@ -540,10 +1166,7 @@ class LibrarianReportView(APIView):
         )
 
         return Response({
-            "filters": {
-                "category_id": category_id,
-                "due_before": due_before,
-            },
+            "filters": {"category_id": category_id, "due_before": due_before},
             "book_inventory": book_inventory,
             "active_borrowings": active_borrowings,
             "reservation_summary": reservation_summary,
@@ -614,180 +1237,180 @@ class MemberReportView(APIView):
         })
 
 
-class RecommendationView(APIView):
+class ChatView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        role = get_role(request)
-        requested_member_id = request.query_params.get("member_id")
-        limit = int(request.query_params.get("limit", 5))
-        limit = max(1, min(limit, 20))
+    def post(self, request):
+        query = request.data.get('query')
+        if not query:
+            return Response({'error': 'Query is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-        if role == "member":
-            member = Member.objects.filter(user=request.user).first()
-            if not member:
-                raise PermissionDenied("No member profile is linked to your account.")
-            target_member_id = member.id
-        else:
-            if requested_member_id:
-                target_member_id = requested_member_id
-            else:
-                member = Member.objects.filter(user=request.user).first()
-                if not member:
-                    return Response(
-                        {"detail": "member_id is required for this account."},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                target_member_id = member.id
+        crud_response = handle_chat_crud(query, request)
+        if crud_response is not None:
+            return Response({'response': crud_response})
 
-        history = BorrowingHistory.objects.filter(member_id=target_member_id).values(
-            "book_id", "book__category_id", "book__author_id"
+        catalog_context = get_relevant_books_context(query)
+        prompt = (
+            "You are a helpful library assistant. You may perform CRUD operations on books, authors, categories, and publishers "
+            "through commands like 'create book', 'update author', 'delete category', or 'list publishers'. "
+            "Use the current library catalog information below to answer general questions. Do not invent books, authors, "
+            "categories, publishers, or availability details outside the data provided."
         )
-        active = Borrowing.objects.filter(member_id=target_member_id).values(
-            "book_id", "book__category_id", "book__author_id"
-        )
+        prompt += f"\n\nCurrent catalog:\n{catalog_context}\n\nUser: {query}"
 
-        seen_book_ids = {row["book_id"] for row in history} | {row["book_id"] for row in active}
-
-        # Content-based profile from this member's own interactions.
-        category_weights = {}
-        author_weights = {}
-        for row in list(history) + list(active):
-            category_id = row["book__category_id"]
-            author_id = row["book__author_id"]
-            if category_id:
-                category_weights[category_id] = category_weights.get(category_id, 0) + 3
-            if author_id:
-                author_weights[author_id] = author_weights.get(author_id, 0) + 2
-
-        # Medium upgrade: collaborative filtering using member-to-member cosine similarity.
-        # We build category-frequency vectors from borrowing history and active borrowings.
-        member_category_counts = {}
-        history_rows = BorrowingHistory.objects.values("member_id", "book__category_id")
-        active_rows = Borrowing.objects.values("member_id", "book__category_id")
-        for row in list(history_rows) + list(active_rows):
-            member_id = row["member_id"]
-            category_id = row["book__category_id"]
-            if not category_id:
-                continue
-            if member_id not in member_category_counts:
-                member_category_counts[member_id] = {}
-            member_category_counts[member_id][category_id] = (
-                member_category_counts[member_id].get(category_id, 0) + 1
-            )
-
-        target_vector = member_category_counts.get(int(target_member_id), {})
-
-        def cosine_similarity(vec_a, vec_b):
-            if not vec_a or not vec_b:
-                return 0.0
-            shared_keys = set(vec_a.keys()) & set(vec_b.keys())
-            dot = sum(vec_a[key] * vec_b[key] for key in shared_keys)
-            mag_a = sum(value * value for value in vec_a.values()) ** 0.5
-            mag_b = sum(value * value for value in vec_b.values()) ** 0.5
-            if mag_a == 0 or mag_b == 0:
-                return 0.0
-            return dot / (mag_a * mag_b)
-
-        similar_members = []
-        for member_id, vector in member_category_counts.items():
-            if str(member_id) == str(target_member_id):
-                continue
-            similarity = cosine_similarity(target_vector, vector)
-            if similarity > 0:
-                similar_members.append((member_id, similarity))
-        similar_members.sort(key=lambda item: item[1], reverse=True)
-        top_similar_members = similar_members[:10]
-
-        collaborative_book_scores = {}
-        if top_similar_members:
-            member_similarity = {member_id: sim for member_id, sim in top_similar_members}
-            similar_member_ids = list(member_similarity.keys())
-
-            similar_member_books = BorrowingHistory.objects.filter(
-                member_id__in=similar_member_ids
-            ).values("member_id", "book_id")
-            for row in similar_member_books:
-                book_id = row["book_id"]
-                if book_id in seen_book_ids:
-                    continue
-                collaborative_book_scores[book_id] = collaborative_book_scores.get(book_id, 0) + (
-                    member_similarity.get(row["member_id"], 0) * 10
-                )
-
-        score_expr = Value(0, output_field=IntegerField())
-        for category_id, weight in category_weights.items():
-            score_expr = score_expr + Case(
-                When(category_id=category_id, then=Value(weight)),
-                default=Value(0),
-                output_field=IntegerField(),
-            )
-        for author_id, weight in author_weights.items():
-            score_expr = score_expr + Case(
-                When(author_id=author_id, then=Value(weight)),
-                default=Value(0),
-                output_field=IntegerField(),
-            )
-
-        recommendations_qs = (
-            BOOK.objects.filter(quantity__gt=0)
-            .exclude(id__in=seen_book_ids)
-            .annotate(ai_score=score_expr, popularity=Count("borrowinghistory"))
-            .order_by("-ai_score", "-popularity", "title")
-        )
-
-        recommendations = list(
-            recommendations_qs.values(
-                "id",
-                "title",
-                "isbn",
-                "quantity",
-                "category__name",
-                "author__name",
-                "publisher__name",
-                "ai_score",
-                "popularity",
-            )[:limit]
-        )
-
-        # Blend collaborative score with existing content score.
-        for item in recommendations:
-            collab_score = collaborative_book_scores.get(item["id"], 0)
-            item["collaborative_score"] = round(collab_score, 2)
-            item["final_score"] = round(float(item["ai_score"]) + collab_score, 2)
-
-        recommendations.sort(
-            key=lambda row: (row["final_score"], row["popularity"], row["title"]),
-            reverse=True,
-        )
-        recommendations = recommendations[:limit]
-
-        if not recommendations:
-            recommendations = list(
-                BOOK.objects.filter(quantity__gt=0)
-                .annotate(popularity=Count("borrowinghistory"))
-                .order_by("-popularity", "-quantity", "title")
-                .values(
-                    "id",
-                    "title",
-                    "isbn",
-                    "quantity",
-                    "category__name",
-                    "author__name",
-                    "publisher__name",
-                    "popularity",
-                )[:limit]
-            )
-            for item in recommendations:
-                item["ai_score"] = 0
-                item["collaborative_score"] = 0
-                item["final_score"] = 0
+        ai_response = call_ai_text(prompt)
+        if ai_response:
+            return Response({'response': ai_response})
 
         return Response(
             {
-                "member_id": target_member_id,
-                "algorithm": "Hybrid recommender (content-based + collaborative filtering + popularity)",
-                "recommendations": recommendations,
-            }
+                'error': 'AI service unavailable',
+                'details': 'No AI provider responded. Ensure your local Ollama server is running or OPENAI_API_KEY is configured correctly.',
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
 
+
+
+def semantic_search_books(query, limit=10):
+    """
+    Perform semantic search using AI to understand user intent beyond keywords.
+    """
+    from django.db.models import Q, Case, When, Value, IntegerField
+    from rest_framework import status
+    
+    # Extract search terms and intent using AI
+    intent_prompt = f"""
+    Analyze this book search query: "{query}"
+    
+    Extract and return ONLY the following in JSON format:
+    {{
+        "search_terms": ["term1", "term2", "term3"],
+        "category_intent": "category_name_or_null",
+        "author_intent": "author_name_or_null",
+        "theme_intent": "theme_or_topic_or_null",
+        "mood_intent": "mood_or_feeling_or_null"
+    }}
+    
+    Focus on understanding what the user is looking for beyond literal keywords.
+    """
+    
+    try:
+        ai_analysis = call_ai_text(intent_prompt)
+        
+        # Parse AI response (simplified - in production would use proper JSON parsing)
+        search_terms = []
+        category_intent = None
+        author_intent = None
+        theme_intent = None
+        mood_intent = None
+        
+        if ai_analysis:
+            # Simple extraction (would be improved with proper JSON parsing)
+            if "search_terms" in ai_analysis:
+                search_terms = [term.strip() for term in ai_analysis.split('"search_terms":')[1].split("]")[0].replace('"', '').split(',') if term.strip()]
+            if "category_intent" in ai_analysis and "null" not in ai_analysis.split("category_intent")[1].split(",")[0]:
+                category_intent = ai_analysis.split("category_intent")[1].split('"')[1]
+            if "author_intent" in ai_analysis and "null" not in ai_analysis.split("author_intent")[1].split(",")[0]:
+                author_intent = ai_analysis.split("author_intent")[1].split('"')[1]
+    except:
+        # Fallback to basic keyword extraction
+        search_terms = query.split()
+    
+    # Build semantic search query
+    books_query = BOOK.objects.filter(quantity__gt=0)
+    
+    # Apply semantic filters
+    q_objects = Q()
+    
+    # Add search terms with different weights
+    for term in search_terms:
+        q_objects |= Q(title__icontains=term)
+        q_objects |= Q(description__icontains=term)
+        q_objects |= Q(summary__icontains=term)
+        q_objects |= Q(author__name__icontains=term)
+        q_objects |= Q(category__name__icontains=term)
+    
+    # Apply intent-based filters
+    if category_intent:
+        books_query = books_query.filter(category__name__icontains=category_intent)
+    
+    if author_intent:
+        books_query = books_query.filter(author__name__icontains=author_intent)
+    
+    # Execute search with semantic scoring
+    books = books_query.filter(q_objects).select_related('author', 'category', 'publisher')
+    
+    # Calculate semantic relevance scores
+    scored_books = []
+    for book in books:
+        score = 0
+        
+        # Title matches (highest weight)
+        for term in search_terms:
+            if term.lower() in book.title.lower():
+                score += 10
+        
+        # Description/summary matches
+        if book.description:
+            for term in search_terms:
+                if term.lower() in book.description.lower():
+                    score += 5
+        
+        if book.summary:
+            for term in search_terms:
+                if term.lower() in book.summary.lower():
+                    score += 5
+        
+        # Category matches
+        if category_intent and book.category and category_intent.lower() in book.category.name.lower():
+            score += 8
+        
+        # Author matches
+        if author_intent and book.author and author_intent.lower() in book.author.name.lower():
+            score += 8
+        
+        # Theme/mood matching in description
+        if theme_intent and book.description and theme_intent.lower() in book.description.lower():
+            score += 6
+        
+        if mood_intent and book.description and mood_intent.lower() in book.description.lower():
+            score += 6
+        
+        scored_books.append((book, score))
+    
+    # Sort by semantic relevance score
+    scored_books.sort(key=lambda x: x[1], reverse=True)
+    
+    # Return top results
+    results = []
+    for book, score in scored_books[:limit]:
+        results.append({
+            'id': book.id,
+            'title': book.title,
+            'author': book.author.name if book.author else 'Unknown',
+            'category': book.category.name if book.category else 'Uncategorized',
+            'description': book.description,
+            'summary': book.summary,
+            'isbn': book.isbn,
+            'quantity': book.quantity,
+            'cover_url': book.cover_url,
+            'semantic_score': score,
+            'relevance_reason': get_relevance_reason(query, book, score)
+        })
+    
+    return results
+
+
+def get_relevance_reason(query, book, score):
+    """
+    Generate a human-readable explanation for why this book was recommended.
+    """
+    if score >= 15:
+        return f"Strong match: '{book.title}' highly relevant to your search for '{query}'"
+    elif score >= 10:
+        return f"Good match: '{book.title}' relates to your search interests"
+    elif score >= 5:
+        return f"Possible match: '{book.title}' may interest you based on '{query}'"
+    else:
+        return f"Related: '{book.title}' found in search results"
