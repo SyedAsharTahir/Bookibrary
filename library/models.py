@@ -76,6 +76,12 @@ class Borrowing(models.Model):
     #blank to allow it be left empty as well
     returned=models.BooleanField(default=False)#set intial to not returned
 
+    def save(self,*args,**kwargs):
+        # Automatically set due date to 14 days from borrow date if not set
+        if not self.dueDate and self.borrowDate:
+            self.dueDate = self.borrowDate + timedelta(days=14)
+        super().save(*args,**kwargs)
+
     def __str__(self):
         return f"{self.member} has borrowed {self.book}"
     

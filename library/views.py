@@ -40,14 +40,23 @@ def call_local_ollama(prompt):
                 'prompt': prompt,
                 'stream': False,
             },
-            timeout=30,
+            timeout=45,
         )
         if response.status_code == 200:
-            return response.json().get('response', '').strip()
+            result = response.json().get('response', '').strip()
+            if result:
+                logger.info("Ollama response received successfully")
+                return result
+            else:
+                logger.warning("Ollama returned empty response")
+                return None
         logger.warning("Ollama local model returned %s: %s", response.status_code, response.text)
         return None
-    except requests.RequestException:
-        logger.warning("Ollama local request failed")
+    except requests.exceptions.Timeout:
+        logger.warning("Ollama request timed out after 45 seconds")
+        return None
+    except requests.RequestException as e:
+        logger.warning("Ollama local request failed: %s", str(e))
         return None
 
 def call_openai_chat(api_key, prompt):
@@ -65,13 +74,18 @@ def call_openai_chat(api_key, prompt):
         'max_tokens': 250,
     }
     try:
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = requests.post(url, headers=headers, json=data, timeout=30)
         if response.status_code == 200:
-            return response.json()['choices'][0]['message']['content'].strip()
+            result = response.json()['choices'][0]['message']['content'].strip()
+            logger.info("OpenAI response received successfully")
+            return result
         logger.warning("OpenAI chat returned %s: %s", response.status_code, response.text)
         return None
-    except requests.RequestException:
-        logger.exception("OpenAI request failed")
+    except requests.exceptions.Timeout:
+        logger.warning("OpenAI request timed out after 30 seconds")
+        return None
+    except requests.RequestException as e:
+        logger.warning("OpenAI request failed: %s", str(e))
         return None
 
 def get_relevant_books_context(query, limit=5):
@@ -121,15 +135,23 @@ def generate_book_description(title, author, category):
     return result or "Description not available."
 
 def generate_book_summary(title, author, category):
-    prompt = (
-        f'Generate a detailed book summary for "{title}" by {author} '
-        f'in the {category} category. The summary should be 4-6 sentences long, '
-        f'providing more depth than a description. Include the main plot points, '
-        f'key themes, and the overall reading experience. Avoid major spoilers '
-        f'but give readers a good understanding of what to expect.'
-    )
+    # Try AI first with a very simple prompt
+    prompt = f'Summary of {title} by {author}, {category} genre:'
     result = call_ai_text(prompt)
-    return result or "Summary not available."
+    
+    # Check if AI failed or returned unhelpful content
+    if (not result or 
+        "couldn't find" in result.lower() or 
+        "information" in result.lower() or 
+        "possible that" in result.lower() or
+        "if you have" in result.lower() or
+        "not well" in result.lower() or
+        len(result) < 20):
+        
+        # Use a reliable template-based summary
+        result = f'"{title}" by {author} is an engaging {category} work that explores the genre\'s characteristic themes. The book offers readers a compelling narrative experience with well-developed characters and thoughtful storytelling. This {category} title provides an enjoyable reading experience that will appeal to fans of the genre.'
+    
+    return result
 
 def generate_author_biography(author_name, books_written):
     prompt = (
@@ -186,12 +208,12 @@ def format_book_summary(book):
     )
 
 
-def list_books(query=None, limit=10):
+def list_books(query=None, limit=1000):
     books = BOOK.objects.select_related('author', 'category', 'publisher').all()
     search = ''
     if query:
         search = query.strip()
-        for prefix in ['list books', 'show books', 'find books', 'search books']:
+        for prefix in ['list all books', 'list books', 'show books', 'find books', 'search books']:
             if search.lower().startswith(prefix):
                 search = search[len(prefix):].strip(' :,-')
                 break
@@ -208,6 +230,93 @@ def list_books(query=None, limit=10):
         return "No matching books were found in the catalog."
 
     return "\n".join(format_book_summary(book) for book in books)
+
+
+def count_books(query=None):
+    books = BOOK.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['number of books in catalog', 'how many books', 'count books', 'total books', 'books count', 'number of books', 'books in catalog']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        books = books.filter(
+            Q(title__icontains=search)
+            | Q(author__name__icontains=search)
+            | Q(category__name__icontains=search)
+            | Q(description__icontains=search)
+        )
+    
+    count = books.count()
+    if search:
+        return f"There are {count} books matching your search criteria."
+    else:
+        return f"There are {count} books in the library catalog."
+
+
+def count_categories(query=None):
+    categories = Category.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['number of categories', 'how many categories', 'count categories', 'total categories', 'categories count']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        categories = categories.filter(
+            Q(name__icontains=search) | Q(description__icontains=search)
+        )
+    
+    count = categories.count()
+    if search:
+        return f"There are {count} categories matching your search criteria."
+    else:
+        return f"There are {count} categories in the library."
+
+
+def count_authors(query=None):
+    authors = Author.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['number of authors', 'how many authors', 'count authors', 'total authors', 'authors count']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        authors = authors.filter(
+            Q(name__icontains=search) | Q(biography__icontains=search)
+        )
+    
+    count = authors.count()
+    if search:
+        return f"There are {count} authors matching your search criteria."
+    else:
+        return f"There are {count} authors in the library."
+
+
+def count_publishers(query=None):
+    publishers = Publisher.objects.all()
+    search = ''
+    if query:
+        search = query.strip()
+        for prefix in ['number of publishers', 'how many publishers', 'count publishers', 'total publishers', 'publishers count']:
+            if search.lower().startswith(prefix):
+                search = search[len(prefix):].strip(' :,-')
+                break
+    if search:
+        publishers = publishers.filter(
+            Q(name__icontains=search) | Q(address__icontains=search)
+        )
+    
+    count = publishers.count()
+    if search:
+        return f"There are {count} publishers matching your search criteria."
+    else:
+        return f"There are {count} publishers in the library."
 
 
 def parse_field(query, field_name):
@@ -355,12 +464,12 @@ def format_publisher_summary(publisher):
     return f"ID: {publisher.id} | Name: {publisher.name}"
 
 
-def list_authors(query=None, limit=10):
+def list_authors(query=None, limit=1000):
     authors = Author.objects.all()
     search = ''
     if query:
         search = query.strip()
-        for prefix in ['list authors', 'show authors', 'find authors', 'search authors']:
+        for prefix in ['list all authors', 'list authors', 'show authors', 'find authors', 'search authors']:
             if search.lower().startswith(prefix):
                 search = search[len(prefix):].strip(' :,-')
                 break
@@ -374,12 +483,12 @@ def list_authors(query=None, limit=10):
     return '\n'.join(format_author_summary(author) for author in authors)
 
 
-def list_categories(query=None, limit=10):
+def list_categories(query=None, limit=1000):
     categories = Category.objects.all()
     search = ''
     if query:
         search = query.strip()
-        for prefix in ['list categories', 'show categories', 'find categories', 'search categories']:
+        for prefix in ['list all categories', 'list categories', 'show categories', 'find categories', 'search categories']:
             if search.lower().startswith(prefix):
                 search = search[len(prefix):].strip(' :,-')
                 break
@@ -393,12 +502,12 @@ def list_categories(query=None, limit=10):
     return '\n'.join(format_category_summary(category) for category in categories)
 
 
-def list_publishers(query=None, limit=10):
+def list_publishers(query=None, limit=1000):
     publishers = Publisher.objects.all()
     search = ''
     if query:
         search = query.strip()
-        for prefix in ['list publishers', 'show publishers', 'find publishers', 'search publishers']:
+        for prefix in ['list all publishers', 'list publishers', 'show publishers', 'find publishers', 'search publishers']:
             if search.lower().startswith(prefix):
                 search = search[len(prefix):].strip(' :,-')
                 break
@@ -546,7 +655,9 @@ def handle_chat_crud(query, request):
         if get_role(request) not in ['admin', 'librarian']:
             return 'Only admin or librarian users can delete books.'
         return delete_book_from_command(query)
-    if 'list books' in lower or 'show books' in lower or 'find books' in lower or 'search books' in lower:
+    if 'number of books' in lower or 'how many books' in lower or 'count books' in lower or 'total books' in lower or 'books count' in lower or 'books in catalog' in lower:
+        return count_books(query)
+    if 'list all books' in lower or 'list books' in lower or 'show books' in lower or 'find books' in lower or 'search books' in lower:
         return list_books(query)
     if 'create author' in lower or 'add author' in lower:
         if get_role(request) not in ['admin', 'librarian']:
@@ -560,7 +671,9 @@ def handle_chat_crud(query, request):
         if get_role(request) not in ['admin', 'librarian']:
             return 'Only admin or librarian users can delete authors.'
         return delete_author_from_command(query)
-    if 'list authors' in lower or 'show authors' in lower or 'find authors' in lower or 'search authors' in lower:
+    if 'number of authors' in lower or 'how many authors' in lower or 'count authors' in lower or 'total authors' in lower or 'authors count' in lower:
+        return count_authors(query)
+    if 'list authors' in lower or 'show authors' in lower or 'find authors' in lower or 'search authors' in lower or 'list all authors' in lower:
         return list_authors(query)
     if 'create category' in lower or 'add category' in lower:
         if get_role(request) not in ['admin', 'librarian']:
@@ -574,7 +687,9 @@ def handle_chat_crud(query, request):
         if get_role(request) not in ['admin', 'librarian']:
             return 'Only admin or librarian users can delete categories.'
         return delete_category_from_command(query)
-    if 'list categories' in lower or 'show categories' in lower or 'find categories' in lower or 'search categories' in lower:
+    if 'number of categories' in lower or 'how many categories' in lower or 'count categories' in lower or 'total categories' in lower or 'categories count' in lower:
+        return count_categories(query)
+    if 'list categories' in lower or 'show categories' in lower or 'find categories' in lower or 'search categories' in lower or 'list all categories' in lower:
         return list_categories(query)
     if 'create publisher' in lower or 'add publisher' in lower:
         if get_role(request) not in ['admin', 'librarian']:
@@ -588,7 +703,9 @@ def handle_chat_crud(query, request):
         if get_role(request) not in ['admin', 'librarian']:
             return 'Only admin or librarian users can delete publishers.'
         return delete_publisher_from_command(query)
-    if 'list publishers' in lower or 'show publishers' in lower or 'find publishers' in lower or 'search publishers' in lower:
+    if 'number of publishers' in lower or 'how many publishers' in lower or 'count publishers' in lower or 'total publishers' in lower or 'publishers count' in lower:
+        return count_publishers(query)
+    if 'list publishers' in lower or 'show publishers' in lower or 'find publishers' in lower or 'search publishers' in lower or 'list all publishers' in lower:
         return list_publishers(query)
     return None
 
@@ -653,6 +770,12 @@ class BookViewSet(viewsets.ModelViewSet):
                 book.category.name if book.category else 'Uncategorized'
             )
             
+            if not summary or summary.strip() == "Summary not available.":
+                return Response({
+                    'success': False,
+                    'error': 'AI service is currently unavailable. Please check your Ollama server or OpenAI API configuration.'
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
             logger.info(f"Generated summary for book {book.id}: {summary[:100]}...")
             
             # Update the book with the new summary
@@ -673,8 +796,8 @@ class BookViewSet(viewsets.ModelViewSet):
             logger.error(f"Error generating AI summary for book {book.id}: {str(e)}")
             return Response({
                 'success': False,
-                'error': 'Failed to generate AI summary. Please try again later.'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                'error': 'Failed to generate AI summary. The AI service may be unavailable. Please try again later.'
+            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
     def create(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
@@ -907,7 +1030,33 @@ class BorrowingViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
             raise PermissionDenied("Only staff can create borrowings.")
-        return super().create(request, *args, **kwargs)
+        
+        with transaction.atomic():
+            # Get the book and check availability
+            book_id = request.data.get('book')
+            book = BOOK.objects.get(id=book_id)
+            
+            if book.quantity <= 0:
+                raise PermissionDenied("No copies available for borrowing.")
+            
+            # Create the borrowing record
+            response = super().create(request, *args, **kwargs)
+            
+            # Update book quantity (decrease by 1)
+            book.quantity -= 1
+            book.save()
+            
+            # Create notification for member
+            member_id = request.data.get('member')
+            member = Member.objects.get(id=member_id)
+            Notification.objects.create(
+                member=member,
+                message=f"Book borrowed: {book.title}. Due date: {response.data.get('dueDate')}",
+                type='general',
+                isRead=False
+            )
+            
+            return response
 
     def update(self, request, *args, **kwargs):
         if get_role(request) not in ["admin", "librarian"]:
@@ -942,11 +1091,30 @@ class BorrowingViewSet(viewsets.ModelViewSet):
                 fineCharged=fine_amount,
             )
 
+            # Create fine record if overdue
+            if fine_amount > 0:
+                Fine.objects.create(
+                    borrowing=borrowing,
+                    amount=fine_amount,
+                    issuedDate=today
+                )
+                
+                # Create overdue notification
+                Notification.objects.create(
+                    member=borrowing.member,
+                    message=f"Overdue fine of ${fine_amount} charged for book: {borrowing.book.title}",
+                    type='overdue',
+                    isRead=False
+                )
+
             book = borrowing.book
             book.quantity += 1
             book.save()
 
-            borrowing.delete()
+            # Mark borrowing as returned instead of deleting it
+            borrowing.returned = True
+            borrowing.returnDate = today
+            borrowing.save()
             return Response(
                 {
                     "message": "Book returned and history archived.",

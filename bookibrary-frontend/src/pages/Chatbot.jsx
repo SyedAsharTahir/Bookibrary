@@ -19,11 +19,21 @@ function Chatbot() {
             const botMessage = { text: response.data.response, sender: 'bot' };
             setMessages(prev => [...prev, botMessage]);
         } catch (error) {
-            const errorMessage = { 
-                text: 'Sorry, I encountered an error. Please try again.', 
+            let errorMessage = 'Sorry, I encountered an error. Please try again.';
+            
+            if (error?.response?.status === 401) {
+                errorMessage = 'You must be logged in to use the chatbot. Please log in first.';
+            } else if (error?.response?.data?.error) {
+                errorMessage = error.response.data.error;
+            } else if (error?.response?.data?.detail) {
+                errorMessage = error.response.data.detail;
+            }
+            
+            const botMessage = { 
+                text: errorMessage, 
                 sender: 'bot' 
             };
-            setMessages(prev => [...prev, errorMessage]);
+            setMessages(prev => [...prev, botMessage]);
         } finally {
             setLoading(false);
         }

@@ -119,6 +119,11 @@ function Books() {
             return;
         }
 
+        // Prevent multiple clicks while already loading
+        if (summaryLoading[bookId]) {
+            return;
+        }
+
         setSummaryLoading(prev => ({ ...prev, [bookId]: true }));
         setError("");
 
@@ -142,17 +147,26 @@ function Books() {
                     setForm(prev => ({ ...prev, summary: response.data.summary }));
                 }
                 
-                // Also refetch all books to ensure data consistency
-                fetchBooks();
+                // Show success message briefly
+                setError("✅ AI summary generated successfully!");
+                setTimeout(() => setError(""), 3000);
                 
             } else {
                 setError(response.data.error || "Failed to generate AI summary.");
             }
         } catch (error) {
-            const message = 
-                error?.response?.data?.error ||
-                error?.response?.data?.detail ||
-                "Failed to generate AI summary. Please try again.";
+            let message = "Failed to generate AI summary. Please try again.";
+            
+            if (error?.response?.status === 401) {
+                message = "You must be logged in as admin or librarian to generate AI summaries.";
+            } else if (error?.response?.status === 403) {
+                message = "Only admin or librarian can generate AI summaries.";
+            } else if (error?.response?.data?.error) {
+                message = error.response.data.error;
+            } else if (error?.response?.data?.detail) {
+                message = error.response.data.detail;
+            }
+            
             setError(message);
             console.error('Summary generation error:', error);
         } finally {
@@ -335,6 +349,7 @@ return (
                                     <div className="flex items-center gap-2">
                                         {canManageBooks && (
                                             <button
+                                                type="button"
                                                 onClick={() => GenerateAISummary(book.id)}
                                                 disabled={summaryLoading[book.id]}
                                                 className="bg-green-500 text-white px-2 py-1 text-xs rounded hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
